@@ -448,6 +448,25 @@ bool CEGLContextUtils::BindContext()
   return true;
 }
 
+bool CEGLContextUtils::BindContextSurfaceless()
+{
+  if (m_eglDisplay == EGL_NO_DISPLAY || m_eglContext == EGL_NO_CONTEXT)
+  {
+    throw std::logic_error("Activating an EGLContext requires display and context");
+  }
+
+  if (!CEGLUtils::HasExtension(m_eglDisplay, "EGL_KHR_surfaceless_context"))
+    return false;
+
+  if (eglMakeCurrent(m_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, m_eglContext) != EGL_TRUE)
+  {
+    CEGLUtils::Log(LOGERROR, "failed to make context current without surface");
+    return false;
+  }
+
+  return true;
+}
+
 void CEGLContextUtils::SurfaceAttrib()
 {
   if (m_eglDisplay == EGL_NO_DISPLAY || m_eglSurface == EGL_NO_SURFACE)

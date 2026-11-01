@@ -24,6 +24,7 @@ namespace WAYLAND
 {
 
 class CVaapiProxy;
+class CVulkanPresenter;
 
 class CWinSystemWaylandEGLContextGL : public CWinSystemWaylandEGLContext, public CRenderSystemGL
 {
@@ -34,6 +35,10 @@ public:
   // Implementation of CWinSystemBase via CWinSystemWaylandEGLContext
   CRenderSystemBase *GetRenderSystem() override { return this; }
   bool InitWindowSystem() override;
+  bool DestroyWindow() override;
+  void SetDirtyRegions(const CDirtyRegionList& dirtyRegions) override;
+  int GetBufferAge() override;
+  int GetOutputBitDepth() const override;
 
   // GUI compositing for HDR (FBO + sRGB->PQ shader)
   bool SetGuiCompositing(int colorTransfer) override;
@@ -44,6 +49,7 @@ public:
 
 protected:
   bool CreateContext() override;
+  bool CreatePresenter() override;
   void SetContextSize(CSizeInt size) override;
   void SetVSyncImpl(bool enable) override;
   void PresentRenderImpl(bool rendered) override;
@@ -54,6 +60,14 @@ protected:
   std::unique_ptr<CVaapiProxy, delete_CVaapiProxy> m_vaapiProxy;
 
 private:
+  void BindDefaultFramebuffer();
+
+  struct delete_CVulkanPresenter
+  {
+    void operator()(CVulkanPresenter* p) const;
+  };
+  std::unique_ptr<CVulkanPresenter, delete_CVulkanPresenter> m_presenter;
+
   bool m_guiCompositing{false};
   CFrameBufferObject m_guiFbo;
   int m_guiFboWidth{0};
