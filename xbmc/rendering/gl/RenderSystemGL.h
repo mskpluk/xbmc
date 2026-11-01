@@ -149,4 +149,6 @@ protected:
   std::map<ShaderMethodGL, std::unique_ptr<CGLShader>> m_pShader;
   ShaderMethodGL m_method = ShaderMethodGL::SM_DEFAULT;
   GLuint m_vertexArray = GL_NONE;
+  //! Framebuffer bound when an add-on starts rendering, restored afterwards
+  GLint m_stateBlockFramebuffer = 0;
 };
