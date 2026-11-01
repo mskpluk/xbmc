@@ -130,6 +130,10 @@ bool CWinSystemWaylandEGLContextGL::CreatePresenter()
   if (std::getenv("KODI_WAYLAND_EGL_WINDOW"))
     return false;
 
+  // A 10-bit EGL window needs no Vulkan presentation.
+  if (m_eglContext.GetConfigAttrib(EGL_RED_SIZE) >= 10)
+    return false;
+
   if (!m_eglContext.BindContextSurfaceless())
     return false;
 
