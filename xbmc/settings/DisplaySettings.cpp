@@ -298,7 +298,8 @@ bool CDisplaySettings::OnSettingChanging(const std::shared_ptr<const CSetting>& 
 
     // check if the old or the new resolution was/is windowed
     // in which case we don't show any prompt to the user
-    if (oldRes != RES_WINDOW && newRes != RES_WINDOW && oldRes != newRes)
+    if (oldRes != RES_WINDOW && newRes != RES_WINDOW && oldRes != newRes &&
+        !m_savingCurrentResolution)
     {
       if (!m_resolutionChangeAborted)
       {
@@ -441,8 +442,10 @@ void CDisplaySettings::SetCurrentResolution(RESOLUTION resolution, bool save /* 
   {
     // Save videoscreen.screenmode setting
     std::string mode = GetStringFromResolution(resolution);
+    m_savingCurrentResolution = true;
     CServiceBroker::GetSettingsComponent()->GetSettings()->SetString(
         CSettings::SETTING_VIDEOSCREEN_SCREENMODE, mode);
+    m_savingCurrentResolution = false;
 
     // Check if videoscreen.screen setting also needs to be saved
     // e.g. if ToggleFullscreen is called
