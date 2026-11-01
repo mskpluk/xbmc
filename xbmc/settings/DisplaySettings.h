@@ -162,5 +162,7 @@ private:
   bool m_nonLinearStretched{false}; // current non-linear stretch
 
   bool m_resolutionChangeAborted{false};
+  //! Set while Kodi saves a resolution it switched to itself, which needs no confirmation.
+  bool m_savingCurrentResolution{false};
   mutable CCriticalSection m_critical;
 };
