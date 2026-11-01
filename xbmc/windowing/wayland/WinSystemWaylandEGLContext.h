@@ -64,6 +64,12 @@ protected:
   void SetContextSize(CSizeInt size) override;
 
   virtual bool CreateContext() = 0;
+  /**
+   * Lets a subclass present without an EGL window surface. On success the
+   * context must be current.
+   */
+  virtual bool CreatePresenter() { return false; }
+  bool CreateWindowSurface();
 
   wayland::egl_window_t m_nativeWindow;
 };
