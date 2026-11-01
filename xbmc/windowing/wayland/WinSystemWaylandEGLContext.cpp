@@ -14,6 +14,8 @@
 #include "utils/log.h"
 #include "windowing/GraphicContext.h"
 
+#include <drm_fourcc.h>
+
 #include <EGL/eglext.h>
 
 using namespace KODI::WINDOWING::WAYLAND;
@@ -42,12 +44,32 @@ bool CWinSystemWaylandEGLContext::InitWindowSystemEGL(EGLint renderableType, EGL
     return false;
   }
 
-  if (!m_eglContext.ChooseConfig(renderableType))
+  if (!Choose10BitConfig(renderableType) && !m_eglContext.ChooseConfig(renderableType))
   {
     return false;
   }
 
   return true;
+}
+
+bool CWinSystemWaylandEGLContext::Choose10BitConfig(EGLint renderableType)
+{
+#ifdef TARGET_WEBOS
+  // webOS shows video under the GUI, keep the default config with alpha.
+  return false;
+#else
+  // Mesa reports the DRM format as native visual ID. Ask for the opaque
+  // formats: 10-bit configs with alpha carry a config caveat.
+  for (const EGLint format : {DRM_FORMAT_XRGB2101010, DRM_FORMAT_XBGR2101010})
+  {
+    if (m_eglContext.ChooseConfig(renderableType, format, false, 0))
+    {
+      CLog::Log(LOGINFO, "Using a 10-bit EGL config");
+      return true;
+    }
+  }
+  return false;
+#endif
 }
 
 bool CWinSystemWaylandEGLContext::CreateNewWindow(const std::string& name,
