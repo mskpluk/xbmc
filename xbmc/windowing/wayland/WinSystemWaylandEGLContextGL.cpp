@@ -14,6 +14,7 @@
 #include "cores/RetroPlayer/rendering/VideoRenderers/RPRendererFBO.h"
 #include "cores/RetroPlayer/rendering/VideoRenderers/RPRendererOpenGL.h"
 #include "cores/VideoPlayer/VideoRenderers/LinuxRendererGL.h"
+#include "rendering/gl/GuiCompositeShaderGL.h"
 #include "rendering/gl/ScreenshotSurfaceGL.h"
 #include "utils/BufferObjectFactory.h"
 #include "utils/DMAHeapBufferObject.h"
@@ -22,6 +23,11 @@
 #include "windowing/WindowSystemFactory.h"
 
 #include <EGL/eglext.h>
+
+extern "C"
+{
+#include <libavutil/pixfmt.h>
+}
 
 #if defined(HAVE_NVDEC)
 #include "cores/VideoPlayer/DVDCodecs/Video/NVDEC.h"
@@ -129,6 +135,181 @@ void CWinSystemWaylandEGLContextGL::SetVSyncImpl(bool enable)
 void CWinSystemWaylandEGLContextGL::PresentRenderImpl(bool rendered)
 {
   PresentFrame(rendered);
+}
+
+bool CWinSystemWaylandEGLContextGL::SetGuiCompositing(int colorTransfer)
+{
+  // The composite shader only encodes PQ.
+  m_guiCompositing = (colorTransfer == AVCOL_TRC_SMPTE2084);
+
+  if (m_guiCompositing)
+  {
+    if (!m_compositeShader)
+    {
+      std::string defines;
+      if (UseLimitedColor())
+        defines += "#define KODI_LIMITED_RANGE 1\n";
+      m_compositeShader = std::make_unique<CGuiCompositeShaderGL>(defines);
+      if (!m_compositeShader->CompileAndLink())
+      {
+        CLog::Log(LOGERROR,
+                  "CWinSystemWaylandEGLContextGL: failed to compile GUI composite shader");
+        m_compositeShader.reset();
+        m_guiCompositing = false;
+      }
+    }
+  }
+  else
+  {
+    m_guiFbo.Cleanup();
+    m_guiFboWidth = 0;
+    m_guiFboHeight = 0;
+    m_compositeShader.reset();
+  }
+
+  return m_guiCompositing;
+}
+
+bool CWinSystemWaylandEGLContextGL::BeginGuiComposite(bool guiWillRender)
+{
+  if (!m_guiCompositing)
+    return false;
+
+  m_guiWillRender = guiWillRender;
+
+  const int width = CRenderSystemGL::m_width;
+  const int height = CRenderSystemGL::m_height;
+
+  if (!m_guiFbo.IsValid() || m_guiFboWidth != width || m_guiFboHeight != height)
+  {
+    m_guiFbo.Cleanup();
+
+    if (!m_guiFbo.Initialize())
+    {
+      CLog::Log(LOGERROR, "CWinSystemWaylandEGLContextGL: failed to initialize GUI FBO");
+      return false;
+    }
+
+    if (!m_guiFbo.CreateAndBindToTexture(GL_TEXTURE_2D, width, height, GL_RGBA))
+    {
+      CLog::Log(LOGERROR, "CWinSystemWaylandEGLContextGL: failed to create GUI FBO texture {}x{}",
+                width, height);
+      m_guiFbo.Cleanup();
+      return false;
+    }
+
+    if (GetEnabledFrontToBackRendering() && !m_guiFbo.AttachDepthBuffer(width, height))
+    {
+      CLog::Log(LOGERROR,
+                "CWinSystemWaylandEGLContextGL: failed to attach depth buffer to GUI FBO {}x{}",
+                width, height);
+      m_guiFbo.Cleanup();
+      return false;
+    }
+
+    m_guiFboWidth = width;
+    m_guiFboHeight = height;
+    m_guiFboClean = false; // fresh FBO is undefined, force a clear
+    CLog::Log(LOGDEBUG, "CWinSystemWaylandEGLContextGL: created GUI FBO {}x{}", width, height);
+  }
+
+  // Nothing draws into the FBO when the GUI render is skipped; its content is kept.
+  if (!guiWillRender)
+    return true;
+
+  if (!m_guiFbo.BeginRender())
+    return false;
+
+  // Clear only when the FBO holds stale content; idle frames are already clean.
+  if (!m_guiFboClean)
+  {
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    m_guiFboClean = true;
+  }
+
+  return true;
+}
+
+void CWinSystemWaylandEGLContextGL::EndGuiComposite()
+{
+  if (m_guiWillRender)
+    m_guiFbo.EndRender();
+
+  glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+}
+
+// CompositeGui is the last GL operation in the frame (called just before EndRender).
+// GL state (blend mode, active texture, vertex arrays) is not restored afterward;
+// the next frame's rendering sets its own state.
+void CWinSystemWaylandEGLContextGL::CompositeGui()
+{
+  if (!m_guiFbo.IsValid() || !m_guiFbo.IsBound() || !m_compositeShader)
+    return;
+
+  // Only update m_guiFboClean when GUI render fired this frame; otherwise the
+  // FBO is in the same state as the previous frame and the flag stays as-is.
+  if (m_guiWillRender)
+  {
+    const bool guiEmpty = (GetGUIElementCount() == 0);
+    m_guiFboClean = guiEmpty;
+    if (guiEmpty)
+      return;
+  }
+  else if (m_guiFboClean)
+  {
+    return;
+  }
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_guiFbo.Texture());
+
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+  // set up orthographic projection (screen coords, Y-down)
+  const float w = static_cast<float>(m_guiFboWidth);
+  const float h = static_cast<float>(m_guiFboHeight);
+
+  GLfloat proj[16] = {2.0f / w, 0, 0, 0, 0, -2.0f / h, 0, 0, 0, 0, -1, 0, -1.0f, 1.0f, 0, 1};
+
+  m_compositeShader->SetProjection(proj);
+  m_compositeShader->SetSdrPeak(203.0f / 10000.0f);
+  m_compositeShader->Enable();
+
+  const GLint posLoc = m_compositeShader->GetPosLoc();
+  const GLint texLoc = m_compositeShader->GetTexLoc();
+
+  GLfloat vert[4][2] = {{0, 0}, {w, 0}, {w, h}, {0, h}};
+  GLfloat tex[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+  GLubyte idx[4] = {0, 1, 3, 2};
+
+  GLuint vbo[3];
+  glGenBuffers(3, vbo);
+
+  glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(vert), vert, GL_STREAM_DRAW);
+  glVertexAttribPointer(posLoc, 2, GL_FLOAT, GL_FALSE, 0, 0);
+  glEnableVertexAttribArray(posLoc);
+
+  glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(tex), tex, GL_STREAM_DRAW);
+  glVertexAttribPointer(texLoc, 2, GL_FLOAT, GL_FALSE, 0, 0);
+  glEnableVertexAttribArray(texLoc);
+
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vbo[2]);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STREAM_DRAW);
+
+  glDrawElements(GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_BYTE, 0);
+
+  glDisableVertexAttribArray(posLoc);
+  glDisableVertexAttribArray(texLoc);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+  glDeleteBuffers(3, vbo);
+
+  m_compositeShader->Disable();
 }
 
 void CWinSystemWaylandEGLContextGL::delete_CVaapiProxy::operator()(CVaapiProxy *p) const
