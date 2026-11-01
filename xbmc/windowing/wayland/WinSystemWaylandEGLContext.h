@@ -47,6 +47,7 @@ public:
     m_eglContext.SetDamagedRegions(dirtyRegions);
   }
   int GetBufferAge() override { return m_eglContext.GetBufferAge(); }
+  int GetOutputBitDepth() const override { return m_eglContext.GetConfigAttrib(EGL_RED_SIZE); }
 
   bool BindTextureUploadContext() override;
   bool UnbindTextureUploadContext() override;
@@ -58,6 +59,7 @@ protected:
    * and call this function there with appropriate parameters
    */
   bool InitWindowSystemEGL(EGLint renderableType, EGLint apiType);
+  bool Choose10BitConfig(EGLint renderableType);
 
   CSizeInt GetNativeWindowAttachedSize();
   void PresentFrame(bool rendered);
