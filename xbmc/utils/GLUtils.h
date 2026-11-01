@@ -40,6 +40,15 @@ enum class ColorChannel
 };
 
 uint8_t GetChannelFromARGB(const ColorChannel colorChannel, const uint32_t argb);
+
+/*!
+ * \brief Framebuffer that stands in for the window's default framebuffer.
+ *
+ * 0 unless the windowing system renders into an FBO that it presents itself.
+ * Code that unbinds its own FBO binds this one instead of 0.
+ */
+GLuint GetDefaultFramebuffer();
+void SetDefaultFramebuffer(GLuint fbo);
 }
 }
 }

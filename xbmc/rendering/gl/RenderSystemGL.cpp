@@ -408,6 +408,10 @@ void CRenderSystemGL::CaptureStateBlock()
   glMatrixModview.Push();
   glMatrixTexture.Push();
 
+  // Add-ons may unbind their own FBO by binding 0, which is not the window
+  // when the GUI renders into an FBO.
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &m_stateBlockFramebuffer);
+
   glDisable(GL_SCISSOR_TEST); // fixes FBO corruption on Macs
   glActiveTexture(GL_TEXTURE0);
 }
@@ -418,6 +422,7 @@ void CRenderSystemGL::ApplyStateBlock()
     return;
 
   glBindVertexArray(m_vertexArray);
+  glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(m_stateBlockFramebuffer));
 
   glViewport(m_viewPort[0], m_viewPort[1], m_viewPort[2], m_viewPort[3]);
 
@@ -640,7 +645,9 @@ void CRenderSystemGL::SetStereoMode(RenderStereoMode mode, RenderStereoView view
   CRenderSystemBase::SetStereoMode(mode, view);
 
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-  glDrawBuffer(GL_BACK);
+  // An FBO standing in for the window has no GL_BACK.
+  const bool windowFramebuffer = KODI::UTILS::GL::GetDefaultFramebuffer() == 0;
+  glDrawBuffer(windowFramebuffer ? GL_BACK : GL_COLOR_ATTACHMENT0);
 
   if (m_stereoMode == RenderStereoMode::ANAGLYPH_RED_CYAN)
   {
@@ -673,7 +680,7 @@ void CRenderSystemGL::SetStereoMode(RenderStereoMode mode, RenderStereoView view
       glPolygonStipple(stipple_3d+4);
   }
 
-  if (m_stereoMode == RenderStereoMode::HARDWAREBASED)
+  if (m_stereoMode == RenderStereoMode::HARDWAREBASED && windowFramebuffer)
   {
     if (m_stereoView == RenderStereoView::LEFT)
       glDrawBuffer(GL_BACK_LEFT);

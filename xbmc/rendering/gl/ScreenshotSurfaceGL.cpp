@@ -9,6 +9,7 @@
 #include "ScreenshotSurfaceGL.h"
 
 #include "rendering/capture/CaptureReadback.h"
+#include "utils/GLUtils.h"
 #include "utils/Screenshot.h"
 #include "windowing/WinSystem.h"
 
@@ -30,7 +31,15 @@ bool CScreenshotSurfaceGL::Read(const ScreenshotContext& ctx)
 {
   using namespace KODI::RENDERING::CAPTURE;
 
-  glReadBuffer(GL_BACK);
+  if (const GLuint fbo = KODI::UTILS::GL::GetDefaultFramebuffer())
+  {
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+  }
+  else
+  {
+    glReadBuffer(GL_BACK);
+  }
 
   // get current viewport: x, y, width, height
   GLint viewport[4];
