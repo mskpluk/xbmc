@@ -101,7 +101,19 @@ constexpr auto glErrorSeverity = make_map<GLenum, std::string_view>({
 #undef X
 // clang-format on
 
+GLuint defaultFramebuffer = 0;
+
 } // namespace
+
+GLuint KODI::UTILS::GL::GetDefaultFramebuffer()
+{
+  return defaultFramebuffer;
+}
+
+void KODI::UTILS::GL::SetDefaultFramebuffer(GLuint fbo)
+{
+  defaultFramebuffer = fbo;
+}
 
 void KODI::UTILS::GL::GlErrorCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void* userParam)
 {

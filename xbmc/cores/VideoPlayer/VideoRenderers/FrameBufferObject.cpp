@@ -100,7 +100,7 @@ bool CFrameBufferObject::CreateAndBindToTexture(GLenum target, int width, int he
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, m_texid, 0);
   VerifyGLState();
   GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, KODI::UTILS::GL::GetDefaultFramebuffer());
   if (status != GL_FRAMEBUFFER_COMPLETE)
   {
     VerifyGLState();
@@ -192,10 +192,10 @@ bool CFrameBufferObject::AttachDepthBuffer(int width, int height)
     if (status != GL_FRAMEBUFFER_COMPLETE)
       CLog::Log(LOGERROR, "CFrameBufferObject: incomplete depth/stencil framebuffer ({:#x})",
                 status);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, KODI::UTILS::GL::GetDefaultFramebuffer());
     return status == GL_FRAMEBUFFER_COMPLETE;
   }
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, KODI::UTILS::GL::GetDefaultFramebuffer());
   return true;
 }
 
@@ -221,5 +221,5 @@ bool CFrameBufferObject::BeginRender()
 void CFrameBufferObject::EndRender() const
 {
   if (IsValid())
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, KODI::UTILS::GL::GetDefaultFramebuffer());
 }

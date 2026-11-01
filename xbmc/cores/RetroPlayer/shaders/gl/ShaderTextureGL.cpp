@@ -8,6 +8,7 @@
 
 #include "ShaderTextureGL.h"
 
+#include "utils/GLUtils.h"
 #include "utils/log.h"
 
 using namespace KODI::SHADER;
@@ -122,5 +123,5 @@ void CShaderTextureGL::UnbindFBO() const
   if (IsSRGBFramebuffer())
     glDisable(GL_FRAMEBUFFER_SRGB);
 
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, KODI::UTILS::GL::GetDefaultFramebuffer());
 }
