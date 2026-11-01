@@ -42,6 +42,7 @@
 #include "utils/StringUtils.h"
 #include "utils/TimeUtils.h"
 #include "utils/log.h"
+#include "windowing/GraphicContext.h"
 #include "windowing/linux/OSScreenSaverFreedesktop.h"
 
 #include "platform/linux/TimeUtils.h"
@@ -966,8 +967,14 @@ void CWinSystemWayland::SetResolutionInternal(CSizeInt size,
   m_next.scale = scale;
   m_next.shellSurfaceState = state;
 
+  // An output hotplug rebuilds the resolution list and can drop the
+  // resolution Kodi is on, even though nothing else changed
+  const bool resolutionLost{static_cast<size_t>(GetGfxContext().GetVideoResolution()) >=
+                            CDisplaySettings::GetInstance().ResolutionInfoSize()};
+
   // Check if any parameters of the Kodi resolution configuration changed
-  if (refreshRate != m_fRefreshRate || sizes.bufferSize != m_bufferSize || m_bFullScreen != fullScreen)
+  if (resolutionLost || refreshRate != m_fRefreshRate || sizes.bufferSize != m_bufferSize ||
+      m_bFullScreen != fullScreen)
   {
     if (!fullScreen)
     {
