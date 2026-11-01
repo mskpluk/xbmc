@@ -64,6 +64,16 @@ bool CWinSystemWaylandEGLContext::CreateNewWindow(const std::string& name,
     return false;
   }
 
+  if (CreatePresenter())
+  {
+    return true;
+  }
+
+  return CreateWindowSurface();
+}
+
+bool CWinSystemWaylandEGLContext::CreateWindowSurface()
+{
   m_nativeWindow = wayland::egl_window_t{GetMainSurface(), GetBufferSize().Width(), GetBufferSize().Height()};
 
   // CWinSystemWayland::CreateNewWindow sets internal m_bufferSize

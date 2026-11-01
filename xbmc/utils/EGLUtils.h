@@ -199,6 +199,8 @@ public:
   bool ChooseConfig(EGLint renderableType, EGLint visualId = 0, bool hdr = false, int alpha = 8);
   bool CreateContext(CEGLAttributesVec contextAttribs);
   bool BindContext();
+  //! Makes the context current without a window surface (EGL_KHR_surfaceless_context)
+  bool BindContextSurfaceless();
   void Destroy();
   void DestroySurface();
   void DestroyContext();
