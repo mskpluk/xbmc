@@ -18,9 +18,13 @@
 #include "rendering/gl/ScreenshotSurfaceGL.h"
 #include "utils/BufferObjectFactory.h"
 #include "utils/DMAHeapBufferObject.h"
+#include "utils/GLUtils.h"
 #include "utils/UDMABufferObject.h"
 #include "utils/log.h"
 #include "windowing/WindowSystemFactory.h"
+
+#include <cstdlib>
+#include <stdexcept>
 
 #include <EGL/eglext.h>
 
@@ -28,6 +32,10 @@ extern "C"
 {
 #include <libavutil/pixfmt.h>
 }
+
+#if defined(HAVE_VULKAN)
+#include "VulkanPresenter.h"
+#endif
 
 #if defined(HAVE_NVDEC)
 #include "cores/VideoPlayer/DVDCodecs/Video/NVDEC.h"
@@ -115,9 +123,88 @@ bool CWinSystemWaylandEGLContextGL::CreateContext()
   return true;
 }
 
+bool CWinSystemWaylandEGLContextGL::CreatePresenter()
+{
+#if defined(HAVE_VULKAN)
+  // Escape hatch to compare against the plain 8-bit EGL window.
+  if (std::getenv("KODI_WAYLAND_EGL_WINDOW"))
+    return false;
+
+  if (!m_eglContext.BindContextSurfaceless())
+    return false;
+
+  m_presenter.reset(new CVulkanPresenter);
+  if (!m_presenter->Create(reinterpret_cast<wl_display*>(GetConnection()->GetDisplay().c_ptr()),
+                           reinterpret_cast<wl_surface*>(GetMainSurface().c_ptr()),
+                           GetBufferSize().Width(), GetBufferSize().Height()))
+  {
+    CLog::Log(LOGINFO, "Vulkan presentation unavailable, using an 8-bit EGL window");
+    m_presenter.reset();
+    return false;
+  }
+
+  BindDefaultFramebuffer();
+  return true;
+#else
+  return false;
+#endif
+}
+
+void CWinSystemWaylandEGLContextGL::BindDefaultFramebuffer()
+{
+#if defined(HAVE_VULKAN)
+  KODI::UTILS::GL::SetDefaultFramebuffer(m_presenter ? m_presenter->GetFramebuffer() : 0);
+#endif
+  glBindFramebuffer(GL_FRAMEBUFFER, KODI::UTILS::GL::GetDefaultFramebuffer());
+}
+
+bool CWinSystemWaylandEGLContextGL::DestroyWindow()
+{
+  if (m_presenter)
+  {
+    m_presenter.reset();
+    BindDefaultFramebuffer();
+  }
+
+  return CWinSystemWaylandEGLContext::DestroyWindow();
+}
+
+void CWinSystemWaylandEGLContextGL::SetDirtyRegions(const CDirtyRegionList& dirtyRegions)
+{
+  if (!m_presenter)
+    CWinSystemWaylandEGLContext::SetDirtyRegions(dirtyRegions);
+}
+
+int CWinSystemWaylandEGLContextGL::GetBufferAge()
+{
+  // The presenter keeps no history of buffers: always redraw everything.
+  return m_presenter ? 0 : CWinSystemWaylandEGLContext::GetBufferAge();
+}
+
+int CWinSystemWaylandEGLContextGL::GetOutputBitDepth() const
+{
+#if defined(HAVE_VULKAN)
+  if (m_presenter)
+    return m_presenter->GetBitDepth();
+#endif
+  return CWinSystemWaylandEGLContext::GetOutputBitDepth();
+}
+
 void CWinSystemWaylandEGLContextGL::SetContextSize(CSizeInt size)
 {
-  CWinSystemWaylandEGLContext::SetContextSize(size);
+#if defined(HAVE_VULKAN)
+  if (m_presenter)
+  {
+    if (!m_presenter->Resize(size.Width(), size.Height()))
+      CLog::Log(LOGERROR, "Failed to resize Vulkan presentation to {}x{}", size.Width(),
+                size.Height());
+    BindDefaultFramebuffer();
+  }
+  else
+#endif
+  {
+    CWinSystemWaylandEGLContext::SetContextSize(size);
+  }
 
   // Propagate changed dimensions to render system if necessary
   if (CRenderSystemGL::m_width != size.Width() || CRenderSystemGL::m_height != size.Height())
@@ -134,6 +221,29 @@ void CWinSystemWaylandEGLContextGL::SetVSyncImpl(bool enable)
 
 void CWinSystemWaylandEGLContextGL::PresentRenderImpl(bool rendered)
 {
+#if defined(HAVE_VULKAN)
+  if (m_presenter)
+  {
+    PrepareFramePresentation();
+    if (rendered)
+    {
+      m_presenter->Present();
+      // Like a failing eglSwapBuffers, there is no way to show frames anymore.
+      if (m_presenter->HasFailed())
+        throw std::runtime_error("Vulkan presentation failed");
+    }
+    else
+    {
+      // For presentation feedback: Get notification of the next vblank even
+      // when contents did not change
+      GetMainSurface().commit();
+      GetConnection()->GetDisplay().flush();
+    }
+    FinishFramePresentation();
+    return;
+  }
+#endif
+
   PresentFrame(rendered);
 }
 
@@ -310,6 +420,13 @@ void CWinSystemWaylandEGLContextGL::CompositeGui()
   glDeleteBuffers(3, vbo);
 
   m_compositeShader->Disable();
+}
+
+void CWinSystemWaylandEGLContextGL::delete_CVulkanPresenter::operator()(CVulkanPresenter* p) const
+{
+#if defined(HAVE_VULKAN)
+  delete p;
+#endif
 }
 
 void CWinSystemWaylandEGLContextGL::delete_CVaapiProxy::operator()(CVaapiProxy *p) const
