@@ -12,6 +12,7 @@
 #include "utils/log.h"
 
 #include <algorithm>
+#include <cstring>
 #include <map>
 
 using namespace KODI::WINDOWING::GBM;
@@ -74,6 +75,40 @@ bool CDRMConnector::CheckConnector()
   }
 
   return m_connector->connection == DRM_MODE_CONNECTED;
+}
+
+bool CDRMConnector::Refresh()
+{
+  std::unique_ptr<drmModeConnector, DrmModeConnectorDeleter> connector(
+      drmModeGetConnector(m_fd, m_connector->connector_id));
+  if (!connector || connector->connection != DRM_MODE_CONNECTED || connector->count_modes == 0)
+    return false;
+
+  const uint32_t edidId = GetPropertyId("EDID");
+  uint64_t edid = 0;
+  std::unique_ptr<drmModeObjectProperties, DrmModeObjectPropertiesDeleter> props(
+      drmModeObjectGetProperties(m_fd, m_connector->connector_id, DRM_MODE_OBJECT_CONNECTOR));
+  for (uint32_t i = 0; props && edidId && i < props->count_props; i++)
+  {
+    if (props->props[i] == edidId)
+      edid = props->prop_values[i];
+  }
+
+  // without an EDID only the fallback modes are left, e.g. for a display going to sleep
+  if (edid == 0)
+    return false;
+
+  // the probe replaced the EDID blob
+  CachePropertyValue(edidId, edid);
+
+  if (std::equal(connector->modes, connector->modes + connector->count_modes, m_connector->modes,
+                 m_connector->modes + m_connector->count_modes,
+                 [](const drmModeModeInfo& a, const drmModeModeInfo& b)
+                 { return std::memcmp(&a, &b, sizeof(a)) == 0; }))
+    return false;
+
+  m_connector = std::move(connector);
+  return true;
 }
 
 std::string CDRMConnector::GetType()
