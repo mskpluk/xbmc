@@ -648,8 +648,13 @@ bool CWinSystemGbm::SetHDR(const VideoPicture* videoPicture)
   if (!settings)
     return false;
 
+  // the setting may be turned off while HDR metadata is still set
   if (!settings->GetBool(SETTING_WINSYSTEM_IS_HDR_DISPLAY))
-    return false;
+  {
+    if (!m_hdrBlob.IsValid())
+      return false;
+    videoPicture = nullptr;
+  }
 
   auto drm = std::dynamic_pointer_cast<CDRMAtomic>(m_DRM);
   if (!drm)
