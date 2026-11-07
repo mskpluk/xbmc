@@ -17,6 +17,7 @@
 #include "RenderInfo.h"
 #include "BaseRenderer.h"
 #include "ColorManager.h"
+#include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
 #include "utils/Geometry.h"
 
 extern "C" {
@@ -96,6 +97,7 @@ protected:
   void SetTextureFilter(GLenum method);
   void UpdateVideoFilter();
   void CheckVideoParameters(int index);
+  void ConfigureHDR();
   AVColorPrimaries GetSrcPrimaries(AVColorPrimaries srcPrimaries, unsigned int width, unsigned int height);
 
   // textures
@@ -221,6 +223,9 @@ protected:
   ETONEMAPMETHOD m_toneMapMethod = VS_TONEMAPMETHOD_OFF;
   bool m_passthroughHDR = false;
   bool m_hdrFboActive{false};
+  // the picture and setting HDR passthrough was configured for
+  VideoPicture m_picture;
+  bool m_hdrDisplay{false};
   bool m_pboSupported = true;
   bool m_pboUsed = false;
   bool m_nonLinStretch = false;
