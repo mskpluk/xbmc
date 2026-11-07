@@ -82,6 +82,9 @@ public:
   virtual RESOLUTION_INFO GetCurrentMode();
   virtual std::vector<RESOLUTION_INFO> GetModes();
   virtual bool SetMode(const RESOLUTION_INFO& res);
+  //! Returns true if the display modes changed. The current mode is then the
+  //! one from the kernel command line or the preferred one.
+  bool RefreshConnector();
 
   void SetInFenceFd(int fd) { m_inFenceFd = fd; }
   int TakeOutFenceFd()

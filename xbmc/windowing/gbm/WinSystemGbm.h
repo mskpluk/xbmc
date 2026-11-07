@@ -18,11 +18,15 @@
 
 #include "platform/linux/input/LibInputHandler.h"
 
+#include <atomic>
 #include <utility>
+#include <vector>
 
 #include <gbm.h>
 
 class IDispResource;
+struct udev;
+struct udev_monitor;
 
 namespace KODI
 {
@@ -52,6 +56,7 @@ public:
   void FlipPage(bool rendered, bool videoLayer, bool async);
 
   bool CanDoWindowed() override { return false; }
+  bool MessagePump() override;
   void UpdateResolutions() override;
 
   bool UseLimitedColor() override;
@@ -99,11 +104,28 @@ protected:
   std::unique_ptr<CLibInputHandler> m_libinput;
 
 private:
+  void StartHotplugMonitor();
+  void StopHotplugMonitor();
+  static void OnUdevEvent(int id, int fd, short revents, void* data);
+  void OnHotplug();
+  void SetDisplayInfo(const std::vector<uint8_t>& edid);
+  //! also read by other threads, e.g. for infolabels
+  std::shared_ptr<const UTILS::CDisplayInfo> GetDisplayInfo() const;
+
+  udev* m_udev{nullptr};
+  udev_monitor* m_udevMonitor{nullptr};
+  int m_udevMonitorId{0};
+  std::atomic<bool> m_hotplug{false};
+  bool m_hotplugPending{false};
+  XbmcThreads::EndTime<> m_hotplugTimer;
+
   CDRMPropertyBlob m_hdrBlob;
   KODI::UTILS::Eotf m_eotf = KODI::UTILS::Eotf::TRADITIONAL_SDR;
   KODI::UTILS::Colorimetry m_colorimetry = KODI::UTILS::Colorimetry::DEFAULT;
 
-  std::unique_ptr<UTILS::CDisplayInfo> m_info;
+  mutable CCriticalSection m_infoSection;
+  std::shared_ptr<const UTILS::CDisplayInfo> m_info;
+  std::vector<uint8_t> m_edid;
 };
 
 } // namespace GBM

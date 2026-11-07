@@ -38,6 +38,10 @@ public:
 
   bool IsConnected() { return m_connector->connection == DRM_MODE_CONNECTED; }
   bool CheckConnector();
+  //! Probe again and update the EDID of a connected display that returned one.
+  //! Returns true if that display reports other modes.
+  //! The modes returned by GetModeForIndex() before are freed then.
+  bool Refresh();
 
   std::vector<uint8_t> GetEDID() const;
 
