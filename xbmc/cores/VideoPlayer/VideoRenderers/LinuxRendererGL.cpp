@@ -260,15 +260,9 @@ bool CLinuxRendererGL::Configure(const VideoPicture &picture, float fps, unsigne
 
   CServiceBroker::GetWinSystem()->SetColorimetry(&picture);
 
-  m_passthroughHDR = CServiceBroker::GetWinSystem()->SetHDR(&picture);
-  CLog::Log(LOGDEBUG, "LinuxRendererGL::Configure: HDR passthrough: {}",
-            m_passthroughHDR ? "on" : "off");
-
-  m_hdrFboActive =
-      m_passthroughHDR && CServiceBroker::GetWinSystem()->SetGuiCompositing(picture.color_transfer);
-  if (m_passthroughHDR && !m_hdrFboActive)
-    CLog::Log(LOGWARNING, "LinuxRendererGL::Configure: HDR passthrough active but GUI "
-                          "compositing not supported by windowing system");
+  m_picture.SetParams(picture);
+  m_hdrDisplay = CServiceBroker::GetWinSystem()->IsHDRDisplaySettingEnabled();
+  ConfigureHDR();
 
   // load 3DLUT
   if (m_ColorManager->IsEnabled())
@@ -499,6 +493,14 @@ void CLinuxRendererGL::Update()
 
 void CLinuxRendererGL::RenderUpdate(int index, int index2, bool clear, unsigned int flags, unsigned int alpha)
 {
+  // the setting can be changed during playback
+  const bool hdrDisplay = CServiceBroker::GetWinSystem()->IsHDRDisplaySettingEnabled();
+  if (hdrDisplay != m_hdrDisplay)
+  {
+    m_hdrDisplay = hdrDisplay;
+    ConfigureHDR();
+  }
+
   if (index2 >= 0)
     m_iYUVRenderBuffer = index2;
   else
@@ -2775,6 +2777,29 @@ void CLinuxRendererGL::DeleteCLUT()
     glDeleteTextures(1, &m_tCLUTTex);
     m_tCLUTTex = 0;
   }
+}
+
+void CLinuxRendererGL::ConfigureHDR()
+{
+  auto* winSystem = CServiceBroker::GetWinSystem();
+  const bool passthroughHDR = winSystem->SetHDR(&m_picture);
+  CLog::Log(LOGDEBUG, "LinuxRendererGL::Configure: HDR passthrough: {}",
+            passthroughHDR ? "on" : "off");
+
+  const bool hdrFboActive =
+      passthroughHDR && winSystem->SetGuiCompositing(m_picture.color_transfer);
+  if (passthroughHDR && !hdrFboActive)
+    CLog::Log(LOGWARNING, "LinuxRendererGL::Configure: HDR passthrough active but GUI "
+                          "compositing not supported by windowing system");
+  else if (m_hdrFboActive && !hdrFboActive)
+    winSystem->SetGuiCompositing(false);
+
+  // the shaders depend on it, e.g. for tone mapping
+  if (passthroughHDR != m_passthroughHDR)
+    m_reloadShaders = true;
+
+  m_passthroughHDR = passthroughHDR;
+  m_hdrFboActive = hdrFboActive;
 }
 
 void CLinuxRendererGL::CheckVideoParameters(int index)
