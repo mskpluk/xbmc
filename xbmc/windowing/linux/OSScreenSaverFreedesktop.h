@@ -27,6 +27,7 @@ public:
   COSScreenSaverFreedesktop() = default;
 
   static bool IsAvailable();
+  static void SimulateUserActivity();
   void Inhibit() override;
   void Uninhibit() override;
 
