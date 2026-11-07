@@ -36,6 +36,13 @@ bool COSScreenSaverFreedesktop::IsAvailable()
   return !error || error.Name() == DBUS_ERROR_NOT_SUPPORTED;
 }
 
+void COSScreenSaverFreedesktop::SimulateUserActivity()
+{
+  CDBusMessage message(SCREENSAVER_INTERFACE, SCREENSAVER_OBJECT, SCREENSAVER_INTERFACE,
+                       "SimulateUserActivity");
+  message.SendSession();
+}
+
 void COSScreenSaverFreedesktop::Inhibit()
 {
   if (m_inhibited)
