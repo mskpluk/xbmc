@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
 #include "cores/VideoPlayer/VideoRenderers/BaseRenderer.h"
 
 class CVideoBuffer;
@@ -49,8 +50,12 @@ protected:
   void ManageRenderArea() override;
 
 private:
+  void ConfigureHDR();
+
   bool m_bConfigured = false;
   int m_iLastRenderBuffer = -1;
+  VideoPicture m_picture;
+  bool m_hdrDisplay = false;
   CRect m_planeDestRect;
 
   std::shared_ptr<CVideoLayerBridgeDRMPRIME> m_videoLayerBridge;

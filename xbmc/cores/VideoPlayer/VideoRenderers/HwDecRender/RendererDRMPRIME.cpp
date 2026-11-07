@@ -116,23 +116,9 @@ bool CRendererDRMPRIME::Configure(const VideoPicture& picture, float fps, unsign
              GetFlagsColorPrimaries(picture.color_primaries) |
              GetFlagsStereoMode(picture.stereoMode);
 
-  // Signal source colorimetry and HDR metadata on the scanout via the DRM
-  // Colorspace and HDR_OUTPUT_METADATA connector properties. The direct-to-
-  // plane scanout path bypasses GL video rendering entirely.
-  if (auto* winSystem = CServiceBroker::GetWinSystem())
-  {
-    winSystem->SetColorimetry(&picture);
-
-    const bool passthroughHDR = winSystem->SetHDR(&picture);
-    CLog::Log(LOGDEBUG, "CRendererDRMPRIME::Configure: HDR passthrough: {}",
-              passthroughHDR ? "on" : "off");
-
-    const bool hdrFboActive =
-        passthroughHDR && winSystem->SetGuiCompositing(picture.color_transfer);
-    if (passthroughHDR && !hdrFboActive)
-      CLog::Log(LOGWARNING, "CRendererDRMPRIME::Configure: HDR passthrough active but "
-                            "GUI compositing not supported by windowing system");
-  }
+  m_picture.SetParams(picture);
+  m_hdrDisplay = CServiceBroker::GetWinSystem()->IsHDRDisplaySettingEnabled();
+  ConfigureHDR();
 
   // Calculate the input frame aspect ratio.
   CalculateFrameAspectRatio(picture.iDisplayWidth, picture.iDisplayHeight);
@@ -239,6 +225,14 @@ void CRendererDRMPRIME::Update()
 void CRendererDRMPRIME::RenderUpdate(
     int index, int index2, bool clear, unsigned int flags, unsigned int alpha)
 {
+  // the setting can be changed during playback
+  const bool hdrDisplay = CServiceBroker::GetWinSystem()->IsHDRDisplaySettingEnabled();
+  if (hdrDisplay != m_hdrDisplay)
+  {
+    m_hdrDisplay = hdrDisplay;
+    ConfigureHDR();
+  }
+
   if (m_iLastRenderBuffer == index && m_videoLayerBridge)
   {
     m_videoLayerBridge->UpdateVideoPlane();
@@ -293,4 +287,28 @@ bool CRendererDRMPRIME::Supports(ERENDERFEATURE feature) const
 bool CRendererDRMPRIME::Supports(ESCALINGMETHOD method) const
 {
   return false;
+}
+
+void CRendererDRMPRIME::ConfigureHDR()
+{
+  // Signal source colorimetry and HDR metadata on the scanout via the DRM
+  // Colorspace and HDR_OUTPUT_METADATA connector properties. The direct-to-
+  // plane scanout path bypasses GL video rendering entirely.
+  auto* winSystem = CServiceBroker::GetWinSystem();
+  if (!winSystem)
+    return;
+
+  winSystem->SetColorimetry(&m_picture);
+
+  const bool passthroughHDR = winSystem->SetHDR(&m_picture);
+  CLog::Log(LOGDEBUG, "CRendererDRMPRIME::Configure: HDR passthrough: {}",
+            passthroughHDR ? "on" : "off");
+
+  const bool hdrFboActive =
+      passthroughHDR && winSystem->SetGuiCompositing(m_picture.color_transfer);
+  if (passthroughHDR && !hdrFboActive)
+    CLog::Log(LOGWARNING, "CRendererDRMPRIME::Configure: HDR passthrough active but "
+                          "GUI compositing not supported by windowing system");
+  else if (!passthroughHDR && winSystem->IsHdrComposite())
+    winSystem->SetGuiCompositing(false);
 }
