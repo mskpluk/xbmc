@@ -9,6 +9,7 @@
 #pragma once
 
 #include "application/AppInboundProtocol.h"
+#include "threads/Timer.h"
 
 class CApplication;
 class CGUIMessage;
@@ -26,5 +27,8 @@ public:
   bool OnMessage(const CGUIMessage& message);
 
 private:
+  void ScheduleSkinReload();
+
   CApplication& m_app;
+  CTimer m_skinReloadTimer;
 };
