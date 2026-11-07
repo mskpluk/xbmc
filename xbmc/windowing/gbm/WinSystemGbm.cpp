@@ -12,11 +12,16 @@
 #include "OptionalsReg.h"
 #include "ServiceBroker.h"
 #include "VideoSyncGbm.h"
+#include "application/ApplicationComponents.h"
+#include "application/ApplicationPlayer.h"
 #include "cores/VideoPlayer/VideoReferenceClock.h"
 #include "drm/DRMAtomic.h"
 #include "drm/DRMLegacy.h"
 #include "drm/OffScreenModeSetting.h"
+#include "guilib/GUIComponent.h"
+#include "guilib/GUIWindowManager.h"
 #include "messaging/ApplicationMessenger.h"
+#include "platform/Platform.h"
 #include "settings/DisplaySettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
@@ -30,8 +35,13 @@
 #include "utils/log.h"
 #include "windowing/GraphicContext.h"
 
+#include "platform/linux/FDEventMonitor.h"
+
 #include <mutex>
 #include <string.h>
+
+#include <libudev.h>
+#include <poll.h>
 
 #ifndef HAVE_HDR_OUTPUT_METADATA
 // HDR structs is copied from linux include/linux/hdmi.h
@@ -110,6 +120,7 @@ CWinSystemGbm::CWinSystemGbm()
 
 CWinSystemGbm::~CWinSystemGbm()
 {
+  StopHotplugMonitor();
   CServiceBroker::GetSettingsComponent()->GetSettings()->GetSettingsManager()->UnregisterCallback(
       this);
 }
@@ -180,7 +191,7 @@ bool CWinSystemGbm::InitWindowSystem()
     std::vector<uint8_t> edid = connector->GetEDID();
     if (!edid.empty())
     {
-      m_info = UTILS::CDisplayInfo::Create(edid);
+      SetDisplayInfo(edid);
     }
   }
 
@@ -208,6 +219,8 @@ bool CWinSystemGbm::InitWindowSystem()
 
   SetHDR(nullptr);
 
+  StartHotplugMonitor();
+
   CLog::Log(LOGDEBUG, "CWinSystemGbm::{} - initialized DRM", __FUNCTION__);
   return CWinSystemBase::InitWindowSystem();
 }
@@ -216,9 +229,151 @@ bool CWinSystemGbm::DestroyWindowSystem()
 {
   CLog::Log(LOGDEBUG, "CWinSystemGbm::{} - deinitialized DRM", __FUNCTION__);
 
+  StopHotplugMonitor();
   m_libinput.reset();
 
   return true;
+}
+
+void CWinSystemGbm::StartHotplugMonitor()
+{
+  if (m_udev || !m_DRM->GetConnector())
+    return;
+
+  m_udev = udev_new();
+  if (!m_udev)
+    return;
+
+  m_udevMonitor = udev_monitor_new_from_netlink(m_udev, "udev");
+  if (!m_udevMonitor ||
+      udev_monitor_filter_add_match_subsystem_devtype(m_udevMonitor, "drm", "drm_minor") < 0 ||
+      udev_monitor_enable_receiving(m_udevMonitor) < 0)
+  {
+    CLog::Log(LOGWARNING, "CWinSystemGbm::{} - unable to monitor display hotplug", __FUNCTION__);
+    udev_monitor_unref(m_udevMonitor);
+    m_udevMonitor = nullptr;
+    udev_unref(m_udev);
+    m_udev = nullptr;
+    return;
+  }
+
+  // only registered with ALSA
+  const auto eventMonitor = CServiceBroker::GetPlatform().GetService<CFDEventMonitor>();
+  if (!eventMonitor)
+  {
+    CLog::Log(LOGWARNING, "CWinSystemGbm::{} - no fd event monitor for display hotplug",
+              __FUNCTION__);
+    udev_monitor_unref(m_udevMonitor);
+    m_udevMonitor = nullptr;
+    udev_unref(m_udev);
+    m_udev = nullptr;
+    return;
+  }
+
+  eventMonitor->AddFD(
+      CFDEventMonitor::MonitoredFD(udev_monitor_get_fd(m_udevMonitor), POLLIN, OnUdevEvent, this),
+      m_udevMonitorId);
+
+  // the display may have changed before the monitor started
+  m_hotplug = true;
+}
+
+void CWinSystemGbm::StopHotplugMonitor()
+{
+  if (!m_udev)
+    return;
+
+  const auto eventMonitor = CServiceBroker::GetPlatform().GetService<CFDEventMonitor>();
+  if (eventMonitor)
+    eventMonitor->RemoveFD(m_udevMonitorId);
+
+  udev_monitor_unref(m_udevMonitor);
+  m_udevMonitor = nullptr;
+  udev_unref(m_udev);
+  m_udev = nullptr;
+}
+
+void CWinSystemGbm::OnUdevEvent(int id, int fd, short revents, void* data)
+{
+  auto* winSystem = static_cast<CWinSystemGbm*>(data);
+  udev_device* device;
+
+  while ((device = udev_monitor_receive_device(winSystem->m_udevMonitor)) != nullptr)
+  {
+    const char* action = udev_device_get_action(device);
+    if (action && strcmp(action, "change") == 0)
+      winSystem->m_hotplug = true;
+
+    udev_device_unref(device);
+  }
+}
+
+bool CWinSystemGbm::MessagePump()
+{
+  // a display waking up may send several hotplugs, wait for the last one
+  if (m_hotplug.exchange(false))
+  {
+    m_hotplugPending = true;
+    m_hotplugTimer.Set(2s);
+  }
+
+  // keep the resolutions of a playing video until it stops, and wait for
+  // modal dialogs, e.g. the one confirming a new resolution
+  const auto gui = CServiceBroker::GetGUI();
+  if (m_hotplugPending && m_hotplugTimer.IsTimePast() &&
+      !CServiceBroker::GetAppComponents().GetComponent<CApplicationPlayer>()->IsPlayingVideo() &&
+      gui && !gui->GetWindowManager().HasModalDialog(true))
+  {
+    m_hotplugPending = false;
+    OnHotplug();
+  }
+
+  return false;
+}
+
+void CWinSystemGbm::OnHotplug()
+{
+  std::unique_lock lock(GetGfxContext());
+
+  const bool modesChanged = m_DRM->RefreshConnector();
+
+  // e.g. a display that was asleep at startup and returned no EDID
+  std::vector<uint8_t> edid = m_DRM->GetConnector()->GetEDID();
+  if (!edid.empty() && edid != m_edid)
+  {
+    CLog::Log(LOGINFO, "CWinSystemGbm::{} - display EDID changed", __FUNCTION__);
+    SetDisplayInfo(edid);
+  }
+
+  if (!modesChanged)
+  {
+    CLog::Log(LOGINFO, "CWinSystemGbm::{} - display modes unchanged", __FUNCTION__);
+    return;
+  }
+
+  CLog::Log(LOGINFO, "CWinSystemGbm::{} - display modes changed", __FUNCTION__);
+
+  UpdateResolutions();
+
+  // the resolution indices changed, apply the one from the settings again
+  const RESOLUTION res = CDisplaySettings::GetInstance().GetDisplayResolution();
+  CDisplaySettings::GetInstance().SetCurrentResolution(res);
+  GetGfxContext().SetVideoResolution(res, true);
+}
+
+void CWinSystemGbm::SetDisplayInfo(const std::vector<uint8_t>& edid)
+{
+  std::shared_ptr<const UTILS::CDisplayInfo> info = UTILS::CDisplayInfo::Create(edid);
+  m_edid = edid;
+
+  std::unique_lock lock(m_infoSection);
+  m_info = std::move(info);
+}
+
+std::shared_ptr<const KODI::UTILS::CDisplayInfo> CWinSystemGbm::GetDisplayInfo() const
+{
+  std::unique_lock lock(m_infoSection);
+  return m_info;
 }
 
 void CWinSystemGbm::UpdateResolutions()
@@ -592,8 +747,9 @@ bool CWinSystemGbm::SetHDR(const VideoPicture* videoPicture)
   KODI::UTILS::Eotf eotf = KODI::UTILS::GetEOTF(*videoPicture);
   m_eotf = eotf;
 
-  if (connector->SupportsProperty("HDR_OUTPUT_METADATA") && m_info &&
-      m_info->SupportsHDRStaticMetadataType1() && m_info->SupportsEOTF(eotf))
+  const auto info = GetDisplayInfo();
+  if (connector->SupportsProperty("HDR_OUTPUT_METADATA") && info &&
+      info->SupportsHDRStaticMetadataType1() && info->SupportsEOTF(eotf))
   {
     hdr_output_metadata hdr_metadata = {};
 
@@ -683,21 +839,23 @@ bool CWinSystemGbm::IsHDRDisplay()
   if (!connector)
     return false;
 
-  return connector->SupportsProperty("HDR_OUTPUT_METADATA") && m_info &&
-         m_info->SupportsHDRStaticMetadataType1();
+  const auto info = GetDisplayInfo();
+  return connector->SupportsProperty("HDR_OUTPUT_METADATA") && info &&
+         info->SupportsHDRStaticMetadataType1();
 }
 
 CHDRCapabilities CWinSystemGbm::GetDisplayHDRCapabilities() const
 {
-  if (!m_info)
+  const auto info = GetDisplayInfo();
+  if (!info)
     return {};
 
   CHDRCapabilities caps;
 
-  if (m_info->SupportsEOTF(UTILS::Eotf::PQ))
+  if (info->SupportsEOTF(UTILS::Eotf::PQ))
     caps.SetHDR10();
 
-  if (m_info->SupportsEOTF(UTILS::Eotf::HLG))
+  if (info->SupportsEOTF(UTILS::Eotf::HLG))
     caps.SetHLG();
 
   return caps;

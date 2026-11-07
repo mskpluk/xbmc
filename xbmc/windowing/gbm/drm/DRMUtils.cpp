@@ -122,6 +122,26 @@ drm_fb* CDRMUtils::DrmFbGetFromBo(struct gbm_bo* bo)
   return fb;
 }
 
+bool CDRMUtils::RefreshConnector()
+{
+  if (!m_connector || !m_connector->Refresh())
+    return false;
+
+  // m_mode pointed into the old mode list. Prefer a mode from the kernel
+  // command line (video=), which is usually the one that was active at startup.
+  m_mode = nullptr;
+  for (int i = 0; i < m_connector->GetModesCount(); i++)
+  {
+    if (m_connector->GetModeForIndex(i)->type & DRM_MODE_TYPE_USERDEF)
+    {
+      m_mode = m_connector->GetModeForIndex(i);
+      return true;
+    }
+  }
+
+  return FindPreferredMode();
+}
+
 bool CDRMUtils::FindPreferredMode()
 {
   if (m_mode)
