@@ -119,13 +119,18 @@ bool IsSkinReloadNeeded()
          !CServiceBroker::GetWinSystem()->GetGfxContext().IsCalibrating();
 }
 
-void ReloadSkinIfNeeded(void*)
+// Add-ons fill their windows and dialogs from code, and a skin reload would
+// leave them empty.
+bool IsAddonWindowOpen()
 {
-  if (IsSkinReloadNeeded())
-    CServiceBroker::GetAppComponents().GetComponent<CApplicationSkinHandling>()->ReloadSkin();
+  const auto& windowManager = CServiceBroker::GetGUI()->GetWindowManager();
+  for (const int id : {windowManager.GetActiveWindow(), windowManager.GetActiveWindowOrDialog()})
+  {
+    if (windowManager.IsPythonWindow(id) || windowManager.IsAddonWindow(id))
+      return true;
+  }
+  return false;
 }
-
-MESSAGING::ThreadMessageCallback reloadSkinCallback{ReloadSkinIfNeeded, nullptr};
 
 // resizing a window sends a resize for every step, reload once it settles
 constexpr auto SKIN_RELOAD_DELAY = std::chrono::milliseconds(500);
@@ -134,13 +139,34 @@ constexpr auto SKIN_RELOAD_DELAY = std::chrono::milliseconds(500);
 CApplicationMessageHandling::CApplicationMessageHandling(CApplication& app)
   : CAppInboundProtocol(app),
     m_app(app),
+    m_reloadSkinCallback(std::make_unique<MESSAGING::ThreadMessageCallback>(
+        MESSAGING::ThreadMessageCallback{ReloadSkinIfNeeded, this})),
     m_skinReloadTimer(
-        []
+        [this]
         {
           if (const auto messenger = CServiceBroker::GetAppMessenger())
-            messenger->PostMsg(TMSG_CALLBACK, -1, -1, &reloadSkinCallback);
+            messenger->PostMsg(TMSG_CALLBACK, -1, -1, m_reloadSkinCallback.get());
         })
 {
+}
+
+CApplicationMessageHandling::~CApplicationMessageHandling() = default;
+
+void CApplicationMessageHandling::ReloadSkinIfNeeded(void* data)
+{
+  if (!IsSkinReloadNeeded())
+    return;
+
+  // ReloadSkin() drops requests while Kodi is starting, and a reload would empty
+  // add-on windows, so try again later
+  auto* handling = static_cast<CApplicationMessageHandling*>(data);
+  if (!handling->m_app.IsInitialized() || IsAddonWindowOpen())
+  {
+    handling->ScheduleSkinReload();
+    return;
+  }
+
+  CServiceBroker::GetAppComponents().GetComponent<CApplicationSkinHandling>()->ReloadSkin();
 }
 
 void CApplicationMessageHandling::ScheduleSkinReload()

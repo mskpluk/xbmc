@@ -11,24 +11,30 @@
 #include "application/AppInboundProtocol.h"
 #include "threads/Timer.h"
 
+#include <memory>
+
 class CApplication;
 class CGUIMessage;
 namespace KODI::MESSAGING
 {
 class ThreadMessage;
+struct ThreadMessageCallback;
 }
 
 class CApplicationMessageHandling : public CAppInboundProtocol
 {
 public:
   explicit CApplicationMessageHandling(CApplication& app);
+  ~CApplicationMessageHandling();
 
   void OnApplicationMessage(KODI::MESSAGING::ThreadMessage* pMsg);
   bool OnMessage(const CGUIMessage& message);
 
 private:
+  static void ReloadSkinIfNeeded(void* data);
   void ScheduleSkinReload();
 
   CApplication& m_app;
+  std::unique_ptr<KODI::MESSAGING::ThreadMessageCallback> m_reloadSkinCallback;
   CTimer m_skinReloadTimer;
 };
