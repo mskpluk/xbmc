@@ -33,6 +33,7 @@ public:
 private:
   static void ReloadSkinIfNeeded(void* data);
   void ScheduleSkinReload();
+  void ScheduleSkinReloadAfterPlayback();
 
   CApplication& m_app;
   std::unique_ptr<KODI::MESSAGING::ThreadMessageCallback> m_reloadSkinCallback;
