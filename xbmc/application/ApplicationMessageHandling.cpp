@@ -177,6 +177,14 @@ void CApplicationMessageHandling::ScheduleSkinReload()
     m_skinReloadTimer.Start(SKIN_RELOAD_DELAY);
 }
 
+void CApplicationMessageHandling::ScheduleSkinReloadAfterPlayback()
+{
+  // pick up a window resized during playback, in full screen only video modes
+  // change and the GUI resolution is restored when playback stops
+  if (!CServiceBroker::GetWinSystem()->GetGfxContext().IsFullScreenRoot())
+    ScheduleSkinReload();
+}
+
 void CApplicationMessageHandling::OnApplicationMessage(MESSAGING::ThreadMessage* pMsg)
 {
   uint32_t msg = pMsg->dwMessage;
@@ -726,8 +734,7 @@ bool CApplicationMessageHandling::OnMessage(const CGUIMessage& message)
 
     case GUI_MSG_PLAYBACK_STOPPED:
     {
-      // a resize during playback was left alone
-      ScheduleSkinReload();
+      ScheduleSkinReloadAfterPlayback();
 
       CServiceBroker::GetPVRManager().OnPlaybackStopped(m_app.CurrentFileItem());
       CServiceBroker::GetFavouritesService().OnPlaybackStopped(m_app.CurrentFileItem());
@@ -753,7 +760,7 @@ bool CApplicationMessageHandling::OnMessage(const CGUIMessage& message)
 
     case GUI_MSG_PLAYBACK_ENDED:
     {
-      ScheduleSkinReload();
+      ScheduleSkinReloadAfterPlayback();
 
       CServiceBroker::GetPVRManager().OnPlaybackEnded(m_app.CurrentFileItem());
       CServiceBroker::GetFavouritesService().OnPlaybackEnded(m_app.CurrentFileItem());
