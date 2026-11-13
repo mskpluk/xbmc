@@ -239,6 +239,8 @@ void NVDEC::SetInteropFailed()
 
 CVideoBufferNVDEC::CVideoBufferNVDEC(int id) : CVideoBuffer(id)
 {
+  // Lets the render manager tell these buffers from other hwaccel buffers.
+  m_pixFormat = AV_PIX_FMT_CUDA;
   m_frame = av_frame_alloc();
 }
 

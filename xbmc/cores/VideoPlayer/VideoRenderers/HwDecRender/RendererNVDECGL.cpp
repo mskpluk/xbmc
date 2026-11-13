@@ -105,7 +105,7 @@ bool CRendererNVDECGL::CreateTexture(int index)
 
 void CRendererNVDECGL::DeleteTexture(int index)
 {
-  ReleaseBuffer(index);
+  // The video buffer stays, CLinuxRendererGL releases it when it isn't kept over a flush.
   ReleaseInterop(m_cudaTextures[index]);
 
   CPictureBuffer& buf = m_buffers[index];
@@ -251,9 +251,11 @@ bool CRendererNVDECGL::UploadTexture(int index)
       ok = CheckCU(cu->cuMemcpy2D(&copy), "cuMemcpy2D");
     }
 
+    // GL must not sample the textures while they are still mapped.
     if (mapped)
-      CheckCU(cu->cuGraphicsUnmapResources(2, textures.resource, nullptr),
-              "cuGraphicsUnmapResources");
+      ok = CheckCU(cu->cuGraphicsUnmapResources(2, textures.resource, nullptr),
+                   "cuGraphicsUnmapResources") &&
+           ok;
     if (!ok)
     {
       SetInteropFailed();
