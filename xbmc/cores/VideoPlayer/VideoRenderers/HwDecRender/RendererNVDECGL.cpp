@@ -78,6 +78,7 @@ bool CRendererNVDECGL::Configure(const VideoPicture& picture, float fps, unsigne
   if (!dynamic_cast<CVideoBufferNVDEC*>(picture.videoBuffer))
     return false;
 
+  m_interopFailed = false;
   return CLinuxRendererGL::Configure(picture, fps, orientation);
 }
 
@@ -108,6 +109,7 @@ void CRendererNVDECGL::DeleteTexture(int index)
   ReleaseInterop(m_cudaTextures[index]);
 
   CPictureBuffer& buf = m_buffers[index];
+  buf.loaded = false;
   buf.fields[FIELD_FULL][0].id = 0;
   buf.fields[FIELD_FULL][1].id = 0;
   buf.fields[FIELD_FULL][2].id = 0;
@@ -194,6 +196,16 @@ bool CRendererNVDECGL::UploadTexture(int index)
   if (!buffer)
     return false;
 
+  // Render() calls this on every pass, copy each frame only once.
+  if (buf.loaded)
+  {
+    CalculateTextureSourceRects(index, 3);
+    return true;
+  }
+
+  if (m_interopFailed)
+    return false;
+
   const AVFrame* frame = buffer->GetFrame();
   CudaTextures& textures = m_cudaTextures[index];
 
@@ -202,21 +214,21 @@ bool CRendererNVDECGL::UploadTexture(int index)
   {
     ReleaseInterop(textures);
     if (!SetupInterop(textures, *buffer))
+    {
+      SetInteropFailed();
+      m_interopFailed = true;
       return false;
+    }
   }
 
   {
     CCudaContextScope scope(textures.context);
-    if (!scope.Ok())
-      return false;
-
     CudaFunctions* cu = GetCudaFunctions();
-    if (!CheckCU(cu->cuGraphicsMapResources(2, textures.resource, nullptr),
-                 "cuGraphicsMapResources"))
-      return false;
+    bool ok = scope.Ok() && CheckCU(cu->cuGraphicsMapResources(2, textures.resource, nullptr),
+                                    "cuGraphicsMapResources");
+    const bool mapped = ok;
 
     const int bytesPerSample = textures.format == AV_PIX_FMT_NV12 ? 1 : 2;
-    bool ok = true;
     for (int p = 0; p < 2 && ok; ++p)
     {
       CUarray array = nullptr;
@@ -239,10 +251,15 @@ bool CRendererNVDECGL::UploadTexture(int index)
       ok = CheckCU(cu->cuMemcpy2D(&copy), "cuMemcpy2D");
     }
 
-    CheckCU(cu->cuGraphicsUnmapResources(2, textures.resource, nullptr),
-            "cuGraphicsUnmapResources");
+    if (mapped)
+      CheckCU(cu->cuGraphicsUnmapResources(2, textures.resource, nullptr),
+              "cuGraphicsUnmapResources");
     if (!ok)
+    {
+      SetInteropFailed();
+      m_interopFailed = true;
       return false;
+    }
   }
 
   const YuvImage& im = buf.image;
@@ -265,6 +282,7 @@ bool CRendererNVDECGL::UploadTexture(int index)
   planes[1].id = textures.id[1];
   planes[2].id = textures.id[1];
 
+  buf.loaded = true;
   CalculateTextureSourceRects(index, 3);
   return true;
 }

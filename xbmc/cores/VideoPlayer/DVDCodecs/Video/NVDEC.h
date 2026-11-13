@@ -38,6 +38,12 @@ namespace NVDEC
 CudaFunctions* GetCudaFunctions();
 
 /*!
+ * \brief Called by the renderer when CUDA-GL interop fails. The decoder then
+ * gives way to software decoding for the rest of the session.
+ */
+void SetInteropFailed();
+
+/*!
  * \brief A decoded frame that stays in GPU memory (AV_PIX_FMT_CUDA).
  * The renderer copies its planes into GL textures via CUDA-GL interop.
  */
@@ -94,6 +100,7 @@ public:
   const std::string Name() override { return "nvdec"; }
   unsigned GetAllowedReferences() override;
   void Reset() override;
+  void SetCodecControl(int flags) override { m_codecControl = flags; }
 
 private:
   bool InitDeinterlacer(const AVFrame* frame);
@@ -107,8 +114,11 @@ private:
   AVFilterContext* m_bufferSrc = nullptr;
   AVFilterContext* m_bufferSink = nullptr;
   AVFrame* m_filterFrame = nullptr;
+  int m_codecControl = 0;
   bool m_deintFailed = false;
-  bool m_deinterlaced = false;
+  bool m_filterEof = false;
+  bool m_filtered = false; //!< current picture came out of the deinterlacer
+  bool m_fieldRate = false; //!< current picture is one field of an interlaced frame
   double m_deintPts = 0.0;
   CVideoBufferNVDEC* m_renderBuffer = nullptr;
   std::shared_ptr<CVideoBufferPoolNVDEC> m_videoBufferPool;

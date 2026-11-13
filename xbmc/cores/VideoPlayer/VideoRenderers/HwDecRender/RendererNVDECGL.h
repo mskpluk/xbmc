@@ -56,4 +56,5 @@ private:
   void ReleaseInterop(CudaTextures& textures);
 
   CudaTextures m_cudaTextures[NUM_BUFFERS];
+  bool m_interopFailed = false;
 };

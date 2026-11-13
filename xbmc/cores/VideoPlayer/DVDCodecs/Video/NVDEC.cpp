@@ -19,6 +19,7 @@
 #include "settings/lib/Setting.h"
 #include "utils/log.h"
 
+#include <atomic>
 #include <list>
 #include <mutex>
 #include <optional>
@@ -36,8 +37,7 @@ using namespace NVDEC;
 
 namespace
 {
-// Frames the renderer may hold in addition to what the decoder keeps for reference.
-constexpr int RENDER_EXTRA_FRAMES = 8;
+std::atomic<bool> interopFailed{false};
 
 bool IsSupportedSwFormat(AVPixelFormat fmt)
 {
@@ -158,6 +158,12 @@ CudaFunctions* NVDEC::GetCudaFunctions()
   return functions;
 }
 
+void NVDEC::SetInteropFailed()
+{
+  if (!interopFailed.exchange(true))
+    CLog::Log(LOGERROR, "NVDEC: GL interop failed, falling back to software decoding");
+}
+
 //------------------------------------------------------------------------------
 // Video buffers
 //------------------------------------------------------------------------------
@@ -254,7 +260,7 @@ IHardwareDecoder* CDecoder::Create(CDVDStreamInfo& hint,
                                    CProcessInfo& processInfo,
                                    AVPixelFormat fmt)
 {
-  if (fmt != AV_PIX_FMT_CUDA || !GetCudaFunctions())
+  if (fmt != AV_PIX_FMT_CUDA || interopFailed || !GetCudaFunctions())
     return nullptr;
 
   // The renderer copies frames with CUDA-GL interop, which needs GL on the NVIDIA GPU.
@@ -319,8 +325,9 @@ bool CDecoder::Open(AVCodecContext* avctx, AVCodecContext* mainctx, const enum A
     return false;
   }
 
-  // Let FFmpeg size the pool for the stream, plus the frames the renderer holds.
-  avctx->extra_hw_frames = RENDER_EXTRA_FRAMES;
+  // Same margin FFmpeg adds when it sets up the frames context itself. Output frames
+  // are copies, the renderer and the deinterlacer don't hold decoder surfaces.
+  avctx->extra_hw_frames = 3;
 
   AVBufferRef* framesRef = nullptr;
   if (avcodec_get_hw_frames_parameters(avctx, m_deviceRef, AV_PIX_FMT_CUDA, &framesRef) < 0)
@@ -361,26 +368,46 @@ bool CDecoder::Open(AVCodecContext* avctx, AVCodecContext* mainctx, const enum A
 
 CDVDVideoCodec::VCReturn CDecoder::Decode(AVCodecContext* avctx, AVFrame* frame)
 {
+  // Makes VideoPlayer reopen the codec, Create() then declines.
+  if (interopFailed)
+    return CDVDVideoCodec::VC_FATAL;
+
   if (!frame)
   {
-    // The deinterlacer outputs two frames per input frame.
-    if (m_filterGraph && PullDeinterlacedFrame())
-      return CDVDVideoCodec::VC_PICTURE;
-    return CDVDVideoCodec::VC_BUFFER;
+    // The deinterlacer outputs two frames per interlaced input frame.
+    if (!m_filterGraph)
+      return CDVDVideoCodec::VC_BUFFER;
+
+    // At the end of the stream flush the frame the deinterlacer holds back.
+    if ((m_codecControl & DVD_CODEC_CTRL_DRAIN) && !m_filterEof)
+    {
+      if (av_buffersrc_add_frame(m_bufferSrc, nullptr) < 0)
+        CLog::Log(LOGERROR, "NVDEC: failed to flush the deinterlacer");
+      m_filterEof = true;
+    }
+    return PullDeinterlacedFrame() ? CDVDVideoCodec::VC_PICTURE : CDVDVideoCodec::VC_BUFFER;
   }
 
   if (frame->format != AV_PIX_FMT_CUDA || !frame->hw_frames_ctx)
     return CDVDVideoCodec::VC_FATAL;
 
-  const bool deint = (frame->flags & AV_FRAME_FLAG_INTERLACED) && !m_deintFailed &&
-                     m_processInfo.GetVideoSettings().m_InterlaceMethod !=
-                         EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE;
-  if (deint && (m_filterGraph || InitDeinterlacer(frame)))
+  if (m_deintFailed || m_processInfo.GetVideoSettings().m_InterlaceMethod ==
+                           EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE)
+    CloseDeinterlacer();
+  else if (!m_filterGraph && (frame->flags & AV_FRAME_FLAG_INTERLACED))
+    InitDeinterlacer(frame);
+
+  // Once running, the deinterlacer gets every frame so the output stays in order.
+  // It passes progressive frames through unchanged.
+  if (m_filterGraph)
   {
     AVFrame* input = av_frame_clone(frame);
     if (!input)
       return CDVDVideoCodec::VC_ERROR;
     input->pts = frame->best_effort_timestamp;
+    // Marks the outputs that are single fields, copied to them by the filter.
+    input->opaque =
+        (frame->flags & AV_FRAME_FLAG_INTERLACED) ? reinterpret_cast<void*>(1) : nullptr;
     const int ret = av_buffersrc_add_frame(m_bufferSrc, input);
     av_frame_free(&input);
     if (ret < 0)
@@ -391,7 +418,8 @@ CDVDVideoCodec::VCReturn CDecoder::Decode(AVCodecContext* avctx, AVFrame* frame)
     return PullDeinterlacedFrame() ? CDVDVideoCodec::VC_PICTURE : CDVDVideoCodec::VC_BUFFER;
   }
 
-  m_deinterlaced = false;
+  m_filtered = false;
+  m_fieldRate = false;
   SetRenderBuffer(frame);
   return CDVDVideoCodec::VC_PICTURE;
 }
@@ -400,14 +428,18 @@ bool CDecoder::GetPicture(AVCodecContext* avctx, VideoPicture* picture)
 {
   static_cast<ICallbackHWAccel*>(avctx->opaque)->GetPictureCommon(picture);
 
-  if (m_deinterlaced)
+  if (m_filtered)
   {
-    // Field-rate output: each picture lasts half a frame.
+    // The deinterlacer delays its output, take the timestamp from the filtered frame.
     picture->pts = m_deintPts;
     picture->dts = DVD_NOPTS_VALUE;
-    picture->iRepeatPicture = -0.5;
-    picture->iFlags &= ~DVP_FLAG_INTERLACED;
+    // Field-rate output: each field lasts half a frame.
+    picture->iRepeatPicture = m_fieldRate ? -0.5 : 0.0;
   }
+
+  // The renderer draws whole frames only. Without the deinterlacer it would
+  // otherwise be asked for single fields.
+  picture->iFlags &= ~DVP_FLAG_INTERLACED;
 
   if (picture->videoBuffer)
     picture->videoBuffer->Release();
@@ -483,7 +515,9 @@ void CDecoder::CloseDeinterlacer()
   avfilter_graph_free(&m_filterGraph);
   m_bufferSrc = nullptr;
   m_bufferSink = nullptr;
-  m_deinterlaced = false;
+  m_filterEof = false;
+  m_filtered = false;
+  m_fieldRate = false;
 }
 
 bool CDecoder::PullDeinterlacedFrame()
@@ -496,7 +530,9 @@ bool CDecoder::PullDeinterlacedFrame()
   m_deintPts = m_filterFrame->pts == AV_NOPTS_VALUE
                    ? DVD_NOPTS_VALUE
                    : m_filterFrame->pts * av_q2d(timeBase) * DVD_TIME_BASE;
-  m_deinterlaced = true;
+  m_filtered = true;
+  // Interlaced frames the filter passes through unchanged keep their flag.
+  m_fieldRate = m_filterFrame->opaque && !(m_filterFrame->flags & AV_FRAME_FLAG_INTERLACED);
   SetRenderBuffer(m_filterFrame);
   return true;
 }
