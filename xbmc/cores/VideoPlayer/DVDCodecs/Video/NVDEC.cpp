@@ -342,6 +342,15 @@ IHardwareDecoder* CDecoder::Create(CDVDStreamInfo& hint,
           CSettings::SETTING_VIDEOPLAYER_USENVDEC))
     return nullptr;
 
+  // Without bwdif_cuda (FFmpeg built without cuda-llvm) interlaced frames would be shown
+  // as they are. Leave interlaced streams to software decoding, which deinterlaces.
+  if (hint.interlaced && !avfilter_get_by_name("bwdif_cuda") &&
+      processInfo.GetVideoSettings().m_InterlaceMethod != EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE)
+  {
+    CLog::Log(LOGINFO, "NVDEC: no bwdif_cuda, leaving the interlaced stream to software decoding");
+    return nullptr;
+  }
+
   return new CDecoder(processInfo);
 }
 
