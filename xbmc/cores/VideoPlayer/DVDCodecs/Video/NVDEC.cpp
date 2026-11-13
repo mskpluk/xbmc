@@ -509,9 +509,6 @@ CDVDVideoCodec::VCReturn CDecoder::Decode(AVCodecContext* avctx, AVFrame* frame)
     if (!input)
       return CDVDVideoCodec::VC_ERROR;
     input->pts = frame->best_effort_timestamp;
-    // Marks the outputs that are single fields, copied to them by the filter.
-    input->opaque =
-        (frame->flags & AV_FRAME_FLAG_INTERLACED) ? reinterpret_cast<void*>(1) : nullptr;
     const int ret = av_buffersrc_add_frame(m_bufferSrc, input);
     av_frame_free(&input);
     if (ret < 0)
@@ -523,7 +520,6 @@ CDVDVideoCodec::VCReturn CDecoder::Decode(AVCodecContext* avctx, AVFrame* frame)
   }
 
   m_filtered = false;
-  m_fieldRate = false;
   SetRenderBuffer(frame);
   return CDVDVideoCodec::VC_PICTURE;
 }
@@ -535,10 +531,10 @@ bool CDecoder::GetPicture(AVCodecContext* avctx, VideoPicture* picture)
   if (m_filtered)
   {
     // The deinterlacer delays its output, take the timestamp from the filtered frame.
+    // Each field has its own timestamp, so no repeat-picture shift (as with VDPAU).
     picture->pts = m_deintPts;
     picture->dts = DVD_NOPTS_VALUE;
-    // Field-rate output: each field lasts half a frame.
-    picture->iRepeatPicture = m_fieldRate ? -0.5 : 0.0;
+    picture->iRepeatPicture = 0.0;
   }
 
   // The renderer draws whole frames only. Without the deinterlacer it would
@@ -621,22 +617,29 @@ void CDecoder::CloseDeinterlacer()
   m_bufferSink = nullptr;
   m_filterEof = false;
   m_filtered = false;
-  m_fieldRate = false;
 }
 
 bool CDecoder::PullDeinterlacedFrame()
 {
   av_frame_unref(m_filterFrame);
-  if (av_buffersink_get_frame(m_bufferSink, m_filterFrame) < 0)
+  const int ret = av_buffersink_get_frame(m_bufferSink, m_filterFrame);
+  if (ret < 0)
+  {
+    // EAGAIN: needs more input, EOF: drained. Anything else is a filter failure.
+    if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
+    {
+      CLog::Log(LOGERROR, "NVDEC: deinterlacer failed, showing interlaced frames");
+      CloseDeinterlacer();
+      m_deintFailed = true;
+    }
     return false;
+  }
 
   const AVRational timeBase = av_buffersink_get_time_base(m_bufferSink);
   m_deintPts = m_filterFrame->pts == AV_NOPTS_VALUE
                    ? DVD_NOPTS_VALUE
                    : m_filterFrame->pts * av_q2d(timeBase) * DVD_TIME_BASE;
   m_filtered = true;
-  // Interlaced frames the filter passes through unchanged keep their flag.
-  m_fieldRate = m_filterFrame->opaque && !(m_filterFrame->flags & AV_FRAME_FLAG_INTERLACED);
   SetRenderBuffer(m_filterFrame);
   return true;
 }

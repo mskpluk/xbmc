@@ -127,14 +127,17 @@ bool CRendererNVDECGL::SetupInterop(CudaTextures& textures, const CVideoBufferNV
   const int width[2] = {frame->width, (frame->width + 1) / 2};
   const int height[2] = {frame->height, (frame->height + 1) / 2};
 
+  const GLint filter = m_scalingMethod == VS_SCALINGMETHOD_NEAREST ? GL_NEAREST : GL_LINEAR;
+
   glGenTextures(2, textures.id);
   for (int p = 0; p < 2; ++p)
   {
     glBindTexture(GL_TEXTURE_2D, textures.id[p]);
     glTexImage2D(GL_TEXTURE_2D, 0, internalFormat[p], width[p], height[p], 0, pixelFormat[p],
                  pixelType, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // Same filter UpdateVideoFilter() would have set, it doesn't run again for new textures.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   }

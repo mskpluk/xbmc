@@ -127,7 +127,6 @@ private:
   bool m_deintFailed = false;
   bool m_filterEof = false;
   bool m_filtered = false; //!< current picture came out of the deinterlacer
-  bool m_fieldRate = false; //!< current picture is one field of an interlaced frame
   double m_deintPts = 0.0;
   CVideoBufferNVDEC* m_renderBuffer = nullptr;
   std::shared_ptr<CVideoBufferPoolNVDEC> m_videoBufferPool;
