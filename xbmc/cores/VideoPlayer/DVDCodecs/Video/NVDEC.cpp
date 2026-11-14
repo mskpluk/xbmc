@@ -249,12 +249,17 @@ CVideoBufferNVDEC::~CVideoBufferNVDEC()
   av_frame_free(&m_frame);
 }
 
-void CVideoBufferNVDEC::SetRef(AVFrame* frame)
+bool CVideoBufferNVDEC::SetRef(AVFrame* frame)
 {
   av_frame_unref(m_frame);
-  av_frame_ref(m_frame, frame);
+  if (av_frame_ref(m_frame, frame) < 0 || !m_frame->hw_frames_ctx)
+  {
+    av_frame_unref(m_frame);
+    return false;
+  }
   const auto* frames = reinterpret_cast<AVHWFramesContext*>(m_frame->hw_frames_ctx->data);
   m_swFormat = frames->sw_format;
+  return true;
 }
 
 void CVideoBufferNVDEC::Unref()
@@ -520,8 +525,7 @@ CDVDVideoCodec::VCReturn CDecoder::Decode(AVCodecContext* avctx, AVFrame* frame)
   }
 
   m_filtered = false;
-  SetRenderBuffer(frame);
-  return CDVDVideoCodec::VC_PICTURE;
+  return SetRenderBuffer(frame) ? CDVDVideoCodec::VC_PICTURE : CDVDVideoCodec::VC_ERROR;
 }
 
 bool CDecoder::GetPicture(AVCodecContext* avctx, VideoPicture* picture)
@@ -554,13 +558,19 @@ void CDecoder::Reset()
   CloseDeinterlacer();
 }
 
-void CDecoder::SetRenderBuffer(AVFrame* frame)
+bool CDecoder::SetRenderBuffer(AVFrame* frame)
 {
   if (m_renderBuffer)
     m_renderBuffer->Release();
 
   m_renderBuffer = static_cast<CVideoBufferNVDEC*>(m_videoBufferPool->Get());
-  m_renderBuffer->SetRef(frame);
+  if (m_renderBuffer->SetRef(frame))
+    return true;
+
+  CLog::Log(LOGERROR, "NVDEC: failed to reference a decoded frame");
+  m_renderBuffer->Release();
+  m_renderBuffer = nullptr;
+  return false;
 }
 
 bool CDecoder::InitDeinterlacer(const AVFrame* frame)
@@ -640,8 +650,7 @@ bool CDecoder::PullDeinterlacedFrame()
                    ? DVD_NOPTS_VALUE
                    : m_filterFrame->pts * av_q2d(timeBase) * DVD_TIME_BASE;
   m_filtered = true;
-  SetRenderBuffer(m_filterFrame);
-  return true;
+  return SetRenderBuffer(m_filterFrame);
 }
 
 CDVDVideoCodec::VCReturn CDecoder::Check(AVCodecContext* avctx)

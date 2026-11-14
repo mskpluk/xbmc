@@ -55,7 +55,8 @@ public:
   explicit CVideoBufferNVDEC(int id);
   ~CVideoBufferNVDEC() override;
 
-  void SetRef(AVFrame* frame);
+  //! False if the frame couldn't be referenced or isn't a CUDA frame
+  bool SetRef(AVFrame* frame);
   void Unref();
 
   const AVFrame* GetFrame() const { return m_frame; }
@@ -115,7 +116,7 @@ private:
   bool InitDeinterlacer(const AVFrame* frame);
   void CloseDeinterlacer();
   bool PullDeinterlacedFrame();
-  void SetRenderBuffer(AVFrame* frame);
+  bool SetRenderBuffer(AVFrame* frame);
 
   CProcessInfo& m_processInfo;
   AVBufferRef* m_deviceRef = nullptr;

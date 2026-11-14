@@ -267,13 +267,13 @@ bool CRendererNVDECGL::UploadTexture(int index)
     }
   }
 
-  const YuvImage& im = buf.image;
   CYuvPlane(&planes)[3] = buf.fields[0];
 
   planes[0].texwidth = frame->width;
   planes[0].texheight = frame->height;
-  planes[1].texwidth = planes[0].texwidth >> im.cshift_x;
-  planes[1].texheight = planes[0].texheight >> im.cshift_y;
+  // Same rounding as the textures allocated in SetupInterop().
+  planes[1].texwidth = (frame->width + 1) / 2;
+  planes[1].texheight = (frame->height + 1) / 2;
   planes[2].texwidth = planes[1].texwidth;
   planes[2].texheight = planes[1].texheight;
 
