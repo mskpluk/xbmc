@@ -251,6 +251,11 @@ CVideoBufferNVDEC::~CVideoBufferNVDEC()
 
 bool CVideoBufferNVDEC::SetRef(AVFrame* frame)
 {
+  if (!m_frame)
+    m_frame = av_frame_alloc();
+  if (!m_frame)
+    return false;
+
   av_frame_unref(m_frame);
   if (av_frame_ref(m_frame, frame) < 0 || !m_frame->hw_frames_ctx)
   {
@@ -264,12 +269,13 @@ bool CVideoBufferNVDEC::SetRef(AVFrame* frame)
 
 void CVideoBufferNVDEC::Unref()
 {
-  av_frame_unref(m_frame);
+  if (m_frame)
+    av_frame_unref(m_frame);
 }
 
 CUcontext CVideoBufferNVDEC::GetCudaContext() const
 {
-  if (!m_frame->hw_frames_ctx)
+  if (!m_frame || !m_frame->hw_frames_ctx)
     return nullptr;
   const auto* frames = reinterpret_cast<AVHWFramesContext*>(m_frame->hw_frames_ctx->data);
   return static_cast<AVCUDADeviceContext*>(frames->device_ctx->hwctx)->cuda_ctx;
@@ -277,7 +283,7 @@ CUcontext CVideoBufferNVDEC::GetCudaContext() const
 
 AVBufferRef* CVideoBufferNVDEC::GetDeviceRef() const
 {
-  if (!m_frame->hw_frames_ctx)
+  if (!m_frame || !m_frame->hw_frames_ctx)
     return nullptr;
   return reinterpret_cast<AVHWFramesContext*>(m_frame->hw_frames_ctx->data)->device_ref;
 }
