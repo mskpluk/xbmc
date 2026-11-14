@@ -136,13 +136,12 @@ bool CRendererNVDECGL::SetupInterop(CudaTextures& textures,
   const bool deep = buffer.GetSwFormat() != AV_PIX_FMT_NV12;
 
   // Plane 0: luma, plane 1: interleaved chroma at half resolution. Field textures have
-  // every other row, both are sized for the top field, which has the extra row if any.
-  const int texField = field == FIELD_FULL ? FIELD_FULL : FIELD_TOP;
+  // every other row, each sized for its own field so no row is left unwritten.
   const GLint internalFormat[2] = {deep ? GL_R16 : GL_R8, deep ? GL_RG16 : GL_RG8};
   const GLenum pixelFormat[2] = {GL_RED, GL_RG};
   const GLenum pixelType = deep ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
   const int width[2] = {frame->width, (frame->width + 1) / 2};
-  const int height[2] = {PlaneRows(frame, 0, texField), PlaneRows(frame, 1, texField)};
+  const int height[2] = {PlaneRows(frame, 0, field), PlaneRows(frame, 1, field)};
 
   const GLint filter = m_scalingMethod == VS_SCALINGMETHOD_NEAREST ? GL_NEAREST : GL_LINEAR;
 
@@ -303,11 +302,10 @@ bool CRendererNVDECGL::CopyToTextures(int index, const CVideoBufferNVDEC& buffer
   CYuvPlane(&planes)[3] = m_buffers[index].fields[field];
 
   // Same sizes as the textures allocated in SetupInterop().
-  const int texField = field == FIELD_FULL ? FIELD_FULL : FIELD_TOP;
   planes[0].texwidth = frame->width;
-  planes[0].texheight = PlaneRows(frame, 0, texField);
+  planes[0].texheight = PlaneRows(frame, 0, field);
   planes[1].texwidth = (frame->width + 1) / 2;
-  planes[1].texheight = PlaneRows(frame, 1, texField);
+  planes[1].texheight = PlaneRows(frame, 1, field);
   planes[2].texwidth = planes[1].texwidth;
   planes[2].texheight = planes[1].texheight;
 
