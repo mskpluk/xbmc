@@ -113,8 +113,10 @@ public:
   void SetCodecControl(int flags) override { m_codecControl = flags; }
 
 private:
+  void SetDeintMethods(bool filter);
   bool InitDeinterlacer(const AVFrame* frame);
   void CloseDeinterlacer();
+  void DeinterlacerFailed(const char* message);
   bool PullDeinterlacedFrame();
   bool SetRenderBuffer(AVFrame* frame);
 
@@ -125,7 +127,6 @@ private:
   AVFilterContext* m_bufferSink = nullptr;
   AVFrame* m_filterFrame = nullptr;
   int m_codecControl = 0;
-  bool m_deintFailed = false;
   bool m_filterEof = false;
   bool m_filtered = false; //!< current picture came out of the deinterlacer
   double m_deintPts = 0.0;
