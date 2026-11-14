@@ -106,26 +106,43 @@ bool CRendererNVDECGL::CreateTexture(int index)
 void CRendererNVDECGL::DeleteTexture(int index)
 {
   // The video buffer stays, CLinuxRendererGL releases it when it isn't kept over a flush.
-  ReleaseInterop(m_cudaTextures[index]);
-
   CPictureBuffer& buf = m_buffers[index];
   buf.loaded = false;
-  buf.fields[FIELD_FULL][0].id = 0;
-  buf.fields[FIELD_FULL][1].id = 0;
-  buf.fields[FIELD_FULL][2].id = 0;
+  for (int f = FIELD_FULL; f <= FIELD_BOT; ++f)
+  {
+    ReleaseInterop(m_cudaTextures[index][f]);
+    for (auto& plane : buf.fields[f])
+      plane.id = 0;
+  }
 }
 
-bool CRendererNVDECGL::SetupInterop(CudaTextures& textures, const CVideoBufferNVDEC& buffer)
+namespace
+{
+//! Rows of a plane in the texture for a whole frame or a single field.
+int PlaneRows(const AVFrame* frame, int plane, int field)
+{
+  const int rows = plane == 0 ? frame->height : (frame->height + 1) / 2;
+  if (field == FIELD_FULL)
+    return rows;
+  return field == FIELD_TOP ? (rows + 1) / 2 : rows / 2;
+}
+} // namespace
+
+bool CRendererNVDECGL::SetupInterop(CudaTextures& textures,
+                                    const CVideoBufferNVDEC& buffer,
+                                    int field)
 {
   const AVFrame* frame = buffer.GetFrame();
   const bool deep = buffer.GetSwFormat() != AV_PIX_FMT_NV12;
 
-  // Plane 0: luma, plane 1: interleaved chroma at half resolution.
+  // Plane 0: luma, plane 1: interleaved chroma at half resolution. Field textures have
+  // every other row, both are sized for the top field, which has the extra row if any.
+  const int texField = field == FIELD_FULL ? FIELD_FULL : FIELD_TOP;
   const GLint internalFormat[2] = {deep ? GL_R16 : GL_R8, deep ? GL_RG16 : GL_RG8};
   const GLenum pixelFormat[2] = {GL_RED, GL_RG};
   const GLenum pixelType = deep ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
   const int width[2] = {frame->width, (frame->width + 1) / 2};
-  const int height[2] = {frame->height, (frame->height + 1) / 2};
+  const int height[2] = {PlaneRows(frame, 0, texField), PlaneRows(frame, 1, texField)};
 
   const GLint filter = m_scalingMethod == VS_SCALINGMETHOD_NEAREST ? GL_NEAREST : GL_LINEAR;
 
@@ -199,29 +216,46 @@ bool CRendererNVDECGL::UploadTexture(int index)
   if (!buffer)
     return false;
 
-  // Render() calls this on every pass, copy each frame only once.
-  if (buf.loaded)
+  // Render() calls this on every pass, copy each frame only once. Render bob draws
+  // single fields, which are copied to their own textures as in the software path.
+  if (!buf.loaded)
+    m_frameLoaded[index] = m_fieldsLoaded[index] = false;
+
+  const bool fields = m_currentField != FIELD_FULL;
+  bool& loaded = fields ? m_fieldsLoaded[index] : m_frameLoaded[index];
+  if (!loaded)
   {
-    CalculateTextureSourceRects(index, 3);
-    return true;
-  }
+    if (m_interopFailed)
+      return false;
 
-  if (m_interopFailed)
-    return false;
-
-  const AVFrame* frame = buffer->GetFrame();
-  CudaTextures& textures = m_cudaTextures[index];
-
-  if (textures.format != buffer->GetSwFormat() || textures.width != frame->width ||
-      textures.height != frame->height || textures.context != buffer->GetCudaContext())
-  {
-    ReleaseInterop(textures);
-    if (!SetupInterop(textures, *buffer))
+    const bool ok = fields ? CopyToTextures(index, *buffer, FIELD_TOP) &&
+                                 CopyToTextures(index, *buffer, FIELD_BOT)
+                           : CopyToTextures(index, *buffer, FIELD_FULL);
+    if (!ok)
     {
       SetInteropFailed();
       m_interopFailed = true;
       return false;
     }
+    loaded = true;
+    buf.loaded = true;
+  }
+
+  CalculateTextureSourceRects(index, 3);
+  return true;
+}
+
+bool CRendererNVDECGL::CopyToTextures(int index, const CVideoBufferNVDEC& buffer, int field)
+{
+  const AVFrame* frame = buffer.GetFrame();
+  CudaTextures& textures = m_cudaTextures[index][field];
+
+  if (textures.format != buffer.GetSwFormat() || textures.width != frame->width ||
+      textures.height != frame->height || textures.context != buffer.GetCudaContext())
+  {
+    ReleaseInterop(textures);
+    if (!SetupInterop(textures, buffer, field))
+      return false;
   }
 
   {
@@ -241,16 +275,19 @@ bool CRendererNVDECGL::UploadTexture(int index)
         break;
 
       // The chroma plane holds width/2 interleaved U/V pairs, i.e. width samples per row.
+      // A field is every other row, starting with the first (top) or second (bottom).
+      const size_t pitch = static_cast<size_t>(frame->linesize[p]);
       CUDA_MEMCPY2D copy{};
       copy.srcMemoryType = CU_MEMORYTYPE_DEVICE;
-      copy.srcDevice = reinterpret_cast<CUdeviceptr>(frame->data[p]);
-      copy.srcPitch = static_cast<size_t>(frame->linesize[p]);
+      copy.srcDevice = reinterpret_cast<CUdeviceptr>(frame->data[p]) +
+                       (field == FIELD_BOT ? pitch : 0);
+      copy.srcPitch = field == FIELD_FULL ? pitch : pitch * 2;
       copy.dstMemoryType = CU_MEMORYTYPE_ARRAY;
       copy.dstArray = array;
       copy.WidthInBytes =
           static_cast<size_t>(p == 0 ? frame->width : ((frame->width + 1) / 2) * 2) *
           bytesPerSample;
-      copy.Height = static_cast<size_t>(p == 0 ? frame->height : (frame->height + 1) / 2);
+      copy.Height = static_cast<size_t>(PlaneRows(frame, p, field));
       ok = CheckCU(cu->cuMemcpy2D(&copy), "cuMemcpy2D");
     }
 
@@ -260,20 +297,17 @@ bool CRendererNVDECGL::UploadTexture(int index)
                    "cuGraphicsUnmapResources") &&
            ok;
     if (!ok)
-    {
-      SetInteropFailed();
-      m_interopFailed = true;
       return false;
-    }
   }
 
-  CYuvPlane(&planes)[3] = buf.fields[0];
+  CYuvPlane(&planes)[3] = m_buffers[index].fields[field];
 
+  // Same sizes as the textures allocated in SetupInterop().
+  const int texField = field == FIELD_FULL ? FIELD_FULL : FIELD_TOP;
   planes[0].texwidth = frame->width;
-  planes[0].texheight = frame->height;
-  // Same rounding as the textures allocated in SetupInterop().
+  planes[0].texheight = PlaneRows(frame, 0, texField);
   planes[1].texwidth = (frame->width + 1) / 2;
-  planes[1].texheight = (frame->height + 1) / 2;
+  planes[1].texheight = PlaneRows(frame, 1, texField);
   planes[2].texwidth = planes[1].texwidth;
   planes[2].texheight = planes[1].texheight;
 
@@ -286,8 +320,5 @@ bool CRendererNVDECGL::UploadTexture(int index)
   planes[0].id = textures.id[0];
   planes[1].id = textures.id[1];
   planes[2].id = textures.id[1];
-
-  buf.loaded = true;
-  CalculateTextureSourceRects(index, 3);
   return true;
 }

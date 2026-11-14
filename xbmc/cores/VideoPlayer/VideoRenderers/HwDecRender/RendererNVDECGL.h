@@ -52,9 +52,13 @@ private:
     AVPixelFormat format = AV_PIX_FMT_NONE;
   };
 
-  bool SetupInterop(CudaTextures& textures, const NVDEC::CVideoBufferNVDEC& buffer);
+  bool SetupInterop(CudaTextures& textures, const NVDEC::CVideoBufferNVDEC& buffer, int field);
   void ReleaseInterop(CudaTextures& textures);
+  bool CopyToTextures(int index, const NVDEC::CVideoBufferNVDEC& buffer, int field);
 
-  CudaTextures m_cudaTextures[NUM_BUFFERS];
+  //! Textures for the whole frame and, for render bob, for the top and bottom field.
+  CudaTextures m_cudaTextures[NUM_BUFFERS][3];
+  bool m_frameLoaded[NUM_BUFFERS]{};
+  bool m_fieldsLoaded[NUM_BUFFERS]{};
   bool m_interopFailed = false;
 };

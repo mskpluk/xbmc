@@ -355,15 +355,6 @@ IHardwareDecoder* CDecoder::Create(CDVDStreamInfo& hint,
           CSettings::SETTING_VIDEOPLAYER_USENVDEC))
     return nullptr;
 
-  // Without bwdif_cuda (FFmpeg built without cuda-llvm) interlaced frames would be shown
-  // as they are. Leave interlaced streams to software decoding, which deinterlaces.
-  if (hint.interlaced && !avfilter_get_by_name("bwdif_cuda") &&
-      processInfo.GetVideoSettings().m_InterlaceMethod != EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE)
-  {
-    CLog::Log(LOGINFO, "NVDEC: no bwdif_cuda, leaving the interlaced stream to software decoding");
-    return nullptr;
-  }
-
   return new CDecoder(processInfo);
 }
 
@@ -470,11 +461,10 @@ bool CDecoder::Open(AVCodecContext* avctx, AVCodecContext* mainctx, const enum A
   av_buffer_unref(&avctx->hw_frames_ctx);
   avctx->hw_frames_ctx = framesRef;
 
-  // Interlaced frames are deinterlaced on the GPU with bwdif_cuda.
+  // Interlaced frames are deinterlaced on the GPU with bwdif_cuda. Without it (FFmpeg
+  // built without cuda-llvm) the renderer shows them field by field (render bob).
   m_processInfo.SetVideoDeintMethod("none");
-  std::list<EINTERLACEMETHOD> deintMethods{EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE,
-                                           EINTERLACEMETHOD::VS_INTERLACEMETHOD_AUTO};
-  m_processInfo.UpdateDeinterlacingMethods(deintMethods);
+  SetDeintMethods(avfilter_get_by_name("bwdif_cuda") != nullptr);
 
   CLog::Log(LOGINFO, "NVDEC: using hardware decoding ({}x{}, {})", frames->width, frames->height,
             av_get_pix_fmt_name(frames->sw_format));
@@ -506,10 +496,16 @@ CDVDVideoCodec::VCReturn CDecoder::Decode(AVCodecContext* avctx, AVFrame* frame)
   if (frame->format != AV_PIX_FMT_CUDA || !frame->hw_frames_ctx)
     return CDVDVideoCodec::VC_FATAL;
 
-  if (m_deintFailed || m_processInfo.GetVideoSettings().m_InterlaceMethod ==
-                           EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE)
+  // Same choice as VideoPlayer makes when it passes the method to the renderer.
+  EINTERLACEMETHOD method = m_processInfo.GetVideoSettings().m_InterlaceMethod;
+  if (!m_processInfo.Supports(method))
+    method = m_processInfo.GetDeinterlacingMethodDefault();
+
+  const bool interlaced = frame->flags & AV_FRAME_FLAG_INTERLACED;
+  if (method == EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE ||
+      method == EINTERLACEMETHOD::VS_INTERLACEMETHOD_RENDER_BOB)
     CloseDeinterlacer();
-  else if (!m_filterGraph && (frame->flags & AV_FRAME_FLAG_INTERLACED))
+  else if (!m_filterGraph && interlaced)
     InitDeinterlacer(frame);
 
   // Once running, the deinterlacer gets every frame so the output stays in order.
@@ -531,6 +527,9 @@ CDVDVideoCodec::VCReturn CDecoder::Decode(AVCodecContext* avctx, AVFrame* frame)
   }
 
   m_filtered = false;
+  m_processInfo.SetVideoDeintMethod(
+      interlaced && method == EINTERLACEMETHOD::VS_INTERLACEMETHOD_RENDER_BOB ? "render bob"
+                                                                               : "none");
   return SetRenderBuffer(frame) ? CDVDVideoCodec::VC_PICTURE : CDVDVideoCodec::VC_ERROR;
 }
 
@@ -545,11 +544,10 @@ bool CDecoder::GetPicture(AVCodecContext* avctx, VideoPicture* picture)
     picture->pts = m_deintPts;
     picture->dts = DVD_NOPTS_VALUE;
     picture->iRepeatPicture = 0.0;
+    // Deinterlaced or passed through as progressive, the flags are from the decoder's
+    // current frame, not this one. Unfiltered interlaced frames keep the flag for bob.
+    picture->iFlags &= ~DVP_FLAG_INTERLACED;
   }
-
-  // The renderer draws whole frames only. Without the deinterlacer it would
-  // otherwise be asked for single fields.
-  picture->iFlags &= ~DVP_FLAG_INTERLACED;
 
   if (picture->videoBuffer)
     picture->videoBuffer->Release();
@@ -577,6 +575,25 @@ bool CDecoder::SetRenderBuffer(AVFrame* frame)
   m_renderBuffer->Release();
   m_renderBuffer = nullptr;
   return false;
+}
+
+void CDecoder::SetDeintMethods(bool filter)
+{
+  std::list<EINTERLACEMETHOD> methods{EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE,
+                                      EINTERLACEMETHOD::VS_INTERLACEMETHOD_RENDER_BOB};
+  if (filter)
+    methods.push_back(EINTERLACEMETHOD::VS_INTERLACEMETHOD_AUTO);
+  m_processInfo.UpdateDeinterlacingMethods(methods);
+  m_processInfo.SetDeinterlacingMethodDefault(
+      filter ? EINTERLACEMETHOD::VS_INTERLACEMETHOD_AUTO
+             : EINTERLACEMETHOD::VS_INTERLACEMETHOD_RENDER_BOB);
+}
+
+void CDecoder::DeinterlacerFailed(const char* message)
+{
+  CLog::Log(LOGERROR, "NVDEC: {}, falling back to render bob", message);
+  CloseDeinterlacer();
+  SetDeintMethods(false);
 }
 
 bool CDecoder::InitDeinterlacer(const AVFrame* frame)
@@ -615,9 +632,7 @@ bool CDecoder::InitDeinterlacer(const AVFrame* frame)
 
   if (!ok)
   {
-    CLog::Log(LOGERROR, "NVDEC: bwdif_cuda deinterlacer not available, showing interlaced frames");
-    CloseDeinterlacer();
-    m_deintFailed = true;
+    DeinterlacerFailed("failed to set up bwdif_cuda");
     return false;
   }
 
@@ -643,11 +658,7 @@ bool CDecoder::PullDeinterlacedFrame()
   {
     // EAGAIN: needs more input, EOF: drained. Anything else is a filter failure.
     if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
-    {
-      CLog::Log(LOGERROR, "NVDEC: deinterlacer failed, showing interlaced frames");
-      CloseDeinterlacer();
-      m_deintFailed = true;
-    }
+      DeinterlacerFailed("deinterlacer failed");
     return false;
   }
 
