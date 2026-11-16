@@ -522,6 +522,12 @@ void CGUIDialogVideoSettings::InitializeSettings()
     entries.emplace_back(36555, VS_TONEMAPMETHOD_REINHARD);
     entries.emplace_back(36557, VS_TONEMAPMETHOD_ACES);
     entries.emplace_back(36558, VS_TONEMAPMETHOD_HABLE);
+    if (appPlayer->Supports(RENDERFEATURE_TONEMAP_LIBPLACEBO))
+    {
+      entries.emplace_back(13499, VS_TONEMAPMETHOD_PL_AUTO);
+      entries.emplace_back(13500, VS_TONEMAPMETHOD_PL_SPLINE);
+      entries.emplace_back(13501, VS_TONEMAPMETHOD_PL_ST2094_40);
+    }
 
     AddSpinner(groupVideo, SETTING_VIDEO_TONEMAP_METHOD, 36553, SettingLevel::Basic,
                videoSettings.m_ToneMapMethod, entries, false, visible);

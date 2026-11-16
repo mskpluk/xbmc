@@ -912,7 +912,7 @@ void CLinuxRendererGLES::LoadShaders(int field)
           }
 
           EShaderFormat shaderFormat = GetShaderFormat();
-          m_toneMapMethod = m_videoSettings.m_ToneMapMethod;
+          m_toneMapMethod = GetShaderToneMapMethod(m_videoSettings.m_ToneMapMethod);
 
           // Try single-pass filter shader for FAST scalers on GLES 3.1+
           if (m_renderQuality == RQ_SINGLEPASS &&
@@ -2127,7 +2127,7 @@ bool CLinuxRendererGLES::IsGuiLayer()
 void CLinuxRendererGLES::CheckVideoParameters(int index)
 {
   const CPictureBuffer& buf = m_buffers[index];
-  const ETONEMAPMETHOD& toneMapMethod = m_videoSettings.m_ToneMapMethod;
+  const ETONEMAPMETHOD toneMapMethod = GetShaderToneMapMethod(m_videoSettings.m_ToneMapMethod);
 
   if (buf.m_srcPrimaries != m_srcPrimaries)
   {

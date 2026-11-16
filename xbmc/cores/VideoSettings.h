@@ -166,8 +166,17 @@ enum ETONEMAPMETHOD
   VS_TONEMAPMETHOD_REINHARD = 1,
   VS_TONEMAPMETHOD_ACES = 2,
   VS_TONEMAPMETHOD_HABLE = 3,
+  VS_TONEMAPMETHOD_PL_AUTO = 4, //!< libplacebo: ST 2094-40 with an HDR10+ curve, else spline
+  VS_TONEMAPMETHOD_PL_SPLINE = 5,
+  VS_TONEMAPMETHOD_PL_ST2094_40 = 6,
   VS_TONEMAPMETHOD_MAX
 };
+
+//! The method for Kodi's own shaders, which fall back to Hable for the libplacebo curves.
+inline ETONEMAPMETHOD GetShaderToneMapMethod(ETONEMAPMETHOD method)
+{
+  return method > VS_TONEMAPMETHOD_HABLE ? VS_TONEMAPMETHOD_HABLE : method;
+}
 
 template<>
 struct fmt::formatter<ETONEMAPMETHOD> : fmt::formatter<std::string_view>
@@ -195,6 +204,9 @@ private:
       {VS_TONEMAPMETHOD_REINHARD, "reinhard"},
       {VS_TONEMAPMETHOD_ACES, "aces"},
       {VS_TONEMAPMETHOD_HABLE, "hable"},
+      {VS_TONEMAPMETHOD_PL_AUTO, "libplacebo auto"},
+      {VS_TONEMAPMETHOD_PL_SPLINE, "libplacebo spline"},
+      {VS_TONEMAPMETHOD_PL_ST2094_40, "libplacebo st2094-40"},
   });
 
   static_assert(VS_TONEMAPMETHOD_MAX == tonemapMethodMap.size(),

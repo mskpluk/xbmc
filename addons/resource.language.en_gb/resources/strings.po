@@ -7921,7 +7921,23 @@ msgctxt "#13498"
 msgid "High Quality"
 msgstr ""
 
-#empty strings from id 13487 to 13504
+#. Tone mapping method of the libplacebo renderer, see #36553
+#: xbmc/video/dialogs/GUIDialogVideoSettings.cpp
+msgctxt "#13499"
+msgid "Auto (ST 2094-40 / spline)"
+msgstr ""
+
+#: xbmc/video/dialogs/GUIDialogVideoSettings.cpp
+msgctxt "#13500"
+msgid "Spline"
+msgstr ""
+
+#: xbmc/video/dialogs/GUIDialogVideoSettings.cpp
+msgctxt "#13501"
+msgid "ST 2094-40"
+msgstr ""
+
+#empty strings from id 13502 to 13504
 
 #: system/settings/settings.xml
 msgctxt "#13505"

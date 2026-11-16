@@ -1007,7 +1007,7 @@ void CLinuxRendererGL::LoadShaders(int field)
     // if single pass, create GLSLOutput helper and pass it to YUV2RGB shader
     EShaderFormat shaderFormat = GetShaderFormat();
     std::shared_ptr<GLSLOutput> out;
-    m_toneMapMethod = m_videoSettings.m_ToneMapMethod;
+    m_toneMapMethod = GetShaderToneMapMethod(m_videoSettings.m_ToneMapMethod);
     if (m_renderQuality == RQ_SINGLEPASS)
     {
       out = std::make_shared<GLSLOutput>(GLSLOutput(4, m_useDithering, m_ditherDepth,
@@ -2813,7 +2813,7 @@ void CLinuxRendererGL::ConfigureHDR()
 void CLinuxRendererGL::CheckVideoParameters(int index)
 {
   const CPictureBuffer& buf = m_buffers[index];
-  const ETONEMAPMETHOD& toneMapMethod = m_videoSettings.m_ToneMapMethod;
+  const ETONEMAPMETHOD toneMapMethod = GetShaderToneMapMethod(m_videoSettings.m_ToneMapMethod);
 
   if (buf.m_srcPrimaries != m_srcPrimaries)
   {
