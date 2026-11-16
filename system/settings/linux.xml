@@ -65,6 +65,40 @@
           </dependencies>
           <control type="toggle" />
         </setting>
+        <setting id="videoplayer.libplacebo.preset" type="integer" label="13494" help="13495">
+          <requirement>HAS_LIBPLACEBO</requirement>
+          <level>2</level>
+          <default>1</default>
+          <constraints>
+            <options>
+              <option label="13496">0</option> <!-- fast -->
+              <option label="13497">1</option> <!-- default -->
+              <option label="13498">2</option> <!-- high_quality -->
+            </options>
+          </constraints>
+          <control type="spinner" format="string" />
+        </setting>
+        <setting id="videoplayer.libplacebo.deband" type="boolean" label="13488" help="13489">
+          <requirement>HAS_LIBPLACEBO</requirement>
+          <visible>false</visible>
+          <level>2</level>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+        <setting id="videoplayer.libplacebo.peakdetect" type="boolean" label="13490" help="13491">
+          <requirement>HAS_LIBPLACEBO</requirement>
+          <visible>false</visible>
+          <level>2</level>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+        <setting id="videoplayer.libplacebo.framemix" type="boolean" label="13492" help="13493">
+          <requirement>HAS_LIBPLACEBO</requirement>
+          <visible>false</visible>
+          <level>2</level>
+          <default>false</default>
+          <control type="toggle" />
+        </setting>
         <setting id="videoplayer.usevaapi" type="boolean" label="13426" help="36156">
           <requirement>HAVE_LIBVA</requirement>
           <visible>false</visible>

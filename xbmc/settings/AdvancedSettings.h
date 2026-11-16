@@ -211,6 +211,38 @@ class CAdvancedSettings : public ISettingCallback, public ISettingsHandler
     float m_videoPlayCountMinimumPercent;
     bool m_videoBypassCodecProfile = false; // Android only to bypass reported codec capabilities
 
+    // libplacebo renderer settings — loaded from <advancedsettings><libplacebo>.
+    // All fields default to empty string, meaning "do not override libplacebo's own default".
+    // Values are passed verbatim to pl_options_set_str(); see libplacebo docs for valid values.
+    std::string m_libplaceboPreset; ///< "" / "fast" / "high_quality"
+    std::string m_libplaceboFrameMixer; ///< "none" / "oversample" / "linear" / "cubic"
+    std::string m_libplaceboAntiringing; ///< float 0–1, e.g. "0.5"
+    std::string m_libplaceboDeband; ///< "yes" / "no"
+    std::string m_libplaceboDebandIterations; ///< integer string, e.g. "1"
+    std::string m_libplaceboDebandThreshold; ///< float string, e.g. "4.0"
+    std::string m_libplaceboDebandRadius; ///< float string, e.g. "16.0"
+    std::string m_libplaceboDebandGrain; ///< float string, e.g. "6.0"
+    std::string m_libplaceboSigmoid; ///< "yes" / "no"
+    std::string m_libplaceboPeakDetect; ///< "yes" / "no"
+    std::string m_libplaceboSmoothingPeriod; ///< float string
+    std::string m_libplaceboSceneThresholdLow; ///< float string
+    std::string m_libplaceboSceneThresholdHigh; ///< float string
+    std::string m_libplaceboPeakPercentile; ///< float string
+    std::string m_libplaceboToneMapping; ///< function name, e.g. "spline"
+    std::string m_libplaceboToneMappingParam; ///< float string
+    std::string m_libplaceboGamutMapping; ///< function name, e.g. "perceptual"
+    std::string m_libplaceboGamutExpansion; ///< "yes" / "no"
+    std::string
+        m_libplaceboDitherMethod; ///< "blue_noise" / "ordered_lut" / "white_noise" / "ordered"
+    std::string m_libplaceboDitherLutSize; ///< integer string (power of 2)
+    std::string m_libplaceboDeinterlace; ///< "yes" / "no"
+    std::string m_libplaceboDeinterlaceAlgo; ///< "yadif" / "weave" / "bob" / "bwdif"
+    std::string m_libplaceboSkipAntiAliasing; ///< "yes" / "no"
+    std::string m_libplaceboDisableLinear; ///< "yes" / "no"
+    std::string m_libplaceboDisableBuiltinScalers; ///< "yes" / "no"
+    std::string m_libplaceboForceDither; ///< "yes" / "no"
+    std::string m_libplaceboDisableFbos; ///< "yes" / "no"
+
     float m_slideshowBlackBarCompensation;
     float m_slideshowZoomAmount;
     float m_slideshowPanAmount;

@@ -18,6 +18,11 @@
 
 #include "system_gl.h"
 
+// Only <GLES2/gl2ext.h> defines it, desktop GL builds need it too.
+#ifndef GL_TEXTURE_EXTERNAL_OES
+#define GL_TEXTURE_EXTERNAL_OES 0x8D65
+#endif
+
 class CDRMPRIMETexture
 {
 public:

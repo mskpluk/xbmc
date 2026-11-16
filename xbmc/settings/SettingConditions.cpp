@@ -394,6 +394,9 @@ void CSettingConditions::Initialize()
 #ifdef HAVE_LIBVA
   m_simpleConditions.emplace("have_libva");
 #endif
+#ifdef HAS_LIBPLACEBO
+  m_simpleConditions.emplace("has_libplacebo");
+#endif
 #ifdef HAVE_LIBVDPAU
   m_simpleConditions.emplace("have_libvdpau");
 #endif

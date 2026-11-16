@@ -484,10 +484,20 @@ void CRenderManager::CreateRenderer()
     if (m_pConfigPicture)
       buffer = m_pConfigPicture->videoBuffer;
 
+    const int method = CServiceBroker::GetSettingsComponent()->GetSettings()->GetInt(
+        CSettings::SETTING_VIDEOPLAYER_RENDERMETHOD);
+    if (method == RENDER_METHOD_LIBPLACEBO)
+    {
+      m_pRenderer = VIDEOPLAYER::CRendererFactory::CreateRenderer("libplacebo", buffer);
+      if (m_pRenderer)
+        return;
+      CLog::Log(LOGWARNING, "CRenderManager: libplacebo renderer not available, using default");
+    }
+
     auto renderers = VIDEOPLAYER::CRendererFactory::GetRenderers();
     for (auto &id : renderers)
     {
-      if (id == "default")
+      if (id == "default" || id == "libplacebo")
         continue;
 
       m_pRenderer = VIDEOPLAYER::CRendererFactory::CreateRenderer(id, buffer);

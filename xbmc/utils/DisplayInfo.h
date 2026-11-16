@@ -67,6 +67,10 @@ public:
 
   bool SupportsColorimetry(Colorimetry colorimetry) const;
 
+  float GetDesiredContentMaxLuminance() const;
+  float GetDesiredContentMinLuminance() const;
+  float GetDesiredContentMaxFrameAvgLuminance() const;
+
 private:
   explicit CDisplayInfo(const std::vector<uint8_t>& edid);
 

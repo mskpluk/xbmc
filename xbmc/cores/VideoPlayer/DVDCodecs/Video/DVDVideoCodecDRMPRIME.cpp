@@ -29,11 +29,17 @@
 extern "C"
 {
 #include <libavcodec/avcodec.h>
+#include <libavutil/dovi_meta.h>
 #include <libavutil/error.h>
+#include <libavutil/hdr_dynamic_metadata.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 }
+
+#if defined(HAS_LIBPLACEBO)
+#include <libplacebo/utils/libav.h>
+#endif
 
 namespace
 {
@@ -615,6 +621,51 @@ void CDVDVideoCodecDRMPRIME::SetPictureParams(VideoPicture* pVideoPicture)
   pVideoPicture->iFlags |=
       m_pFrame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST ? DVP_FLAG_TOP_FIELD_FIRST : 0;
   pVideoPicture->iFlags |= m_pFrame->data[0] ? 0 : DVP_FLAG_DROPPED;
+
+#if defined(HAS_LIBPLACEBO)
+  // Extract HDR/DV metadata for libplacebo — mirrors DVDVideoCodecFFmpeg logic.
+  // Without this, DRMPRIME frames have no plColorSpace/plColorRepr/plDoviMetadata,
+  // so HDR10+ dynamic tone mapping and Dolby Vision RPU processing are inoperative.
+  memset(&pVideoPicture->plColorSpace, 0, sizeof(pl_color_space));
+  memset(&pVideoPicture->plColorRepr, 0, sizeof(pl_color_repr));
+  memset(&pVideoPicture->plDoviMetadata, 0, sizeof(pl_dovi_metadata));
+
+  {
+    AVFrameSideData* mdm =
+        av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
+    AVFrameSideData* clm = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
+    AVFrameSideData* dhp = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
+
+    struct pl_av_hdr_metadata plavhdr = {
+        .mdm = mdm ? reinterpret_cast<AVMasteringDisplayMetadata*>(mdm->data) : nullptr,
+        .clm = clm ? reinterpret_cast<AVContentLightMetadata*>(clm->data) : nullptr,
+        .dhp = dhp ? reinterpret_cast<AVDynamicHDRPlus*>(dhp->data) : nullptr,
+    };
+    pl_map_hdr_metadata(&pVideoPicture->plColorSpace.hdr, &plavhdr);
+  }
+
+  // Dolby Vision: extract RPU metadata for libplacebo tone mapping
+  {
+    AVFrameSideData* doviSd = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_DOVI_METADATA);
+    if (doviSd)
+    {
+      const AVDOVIMetadata* metadata = reinterpret_cast<const AVDOVIMetadata*>(doviSd->buf->data);
+      const AVDOVIRpuDataHeader* header = av_dovi_get_header(metadata);
+      if (header && header->disable_residual_flag)
+      {
+        pl_map_avdovi_metadata(&pVideoPicture->plColorSpace, &pVideoPicture->plColorRepr,
+                               &pVideoPicture->plDoviMetadata, metadata);
+      }
+    }
+
+    AVFrameSideData* rpuSd = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_DOVI_RPU_BUFFER);
+    if (rpuSd)
+    {
+      pl_hdr_metadata_from_dovi_rpu(&pVideoPicture->plColorSpace.hdr, rpuSd->buf->data,
+                                    rpuSd->buf->size);
+    }
+  }
+#endif // HAS_LIBPLACEBO
 
   if (m_codecControlFlags & DVD_CODEC_CTRL_DROP)
   {

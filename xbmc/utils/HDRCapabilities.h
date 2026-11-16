@@ -24,9 +24,19 @@ public:
   void SetHDR10Plus() { m_hdr10_plus = true; }
   void SetDolbyVision() { m_dolby_vision = true; }
 
+  float GetDisplayMaxLuminance() const { return m_maxLuminance; }
+  float GetDisplayMinLuminance() const { return m_minLuminance; }
+  float GetDisplayMaxFrameAvgLuminance() const { return m_maxFrameAvgLuminance; }
+  void SetDisplayMaxLuminance(float val) { m_maxLuminance = val; }
+  void SetDisplayMinLuminance(float val) { m_minLuminance = val; }
+  void SetDisplayMaxFrameAvgLuminance(float val) { m_maxFrameAvgLuminance = val; }
+
 private:
   bool m_hdr10 = false;
   bool m_hlg = false;
   bool m_hdr10_plus = false;
   bool m_dolby_vision = false;
+  float m_maxLuminance = 0.0f;
+  float m_minLuminance = 0.0f;
+  float m_maxFrameAvgLuminance = 0.0f;
 };

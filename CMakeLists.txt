@@ -129,6 +129,7 @@ dependent_option(ENABLE_INTERNAL_FMT "Enable internal fmt?")
 dependent_option(ENABLE_INTERNAL_LCMS2  "Enable internal lcms2?")
 dependent_option(ENABLE_INTERNAL_LIBDVD  "Enable internal libdvd libraries?")
 dependent_option(ENABLE_INTERNAL_LIBMICROHTTPD  "Enable internal libmicrohttpd?")
+dependent_option(ENABLE_INTERNAL_LIBPLACEBO "Enable internal libplacebo?")
 dependent_option(ENABLE_INTERNAL_LZO2 "Enable internal lzo2?")
 dependent_option(ENABLE_INTERNAL_NFS "Enable internal libnfs?")
 dependent_option(ENABLE_INTERNAL_PCRE2 "Enable internal pcre2?")
@@ -278,6 +279,7 @@ set(optional_deps Alsa>=1.0.27
                   DBus
                   Iso9660pp>=2.1.0
                   LCMS2>=2.10
+                  Libplacebo
                   LircClient
                   MDNS
                   MicroHttpd>=0.9.40

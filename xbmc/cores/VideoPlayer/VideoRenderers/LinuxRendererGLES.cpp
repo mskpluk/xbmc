@@ -264,6 +264,14 @@ void CLinuxRendererGLES::AddVideoPicture(const VideoPicture &picture, int index)
   {
     buf.hasLightMetadata = picture.hasLightMetadata;
   }
+
+  buf.pts = picture.pts;
+  buf.iFlags = picture.iFlags;
+#if defined(HAS_LIBPLACEBO)
+  buf.plColorSpace = picture.plColorSpace;
+  buf.plColorRepr = picture.plColorRepr;
+  buf.plDoviMetadata = picture.plDoviMetadata;
+#endif
 }
 
 void CLinuxRendererGLES::ReleaseBuffer(int idx)

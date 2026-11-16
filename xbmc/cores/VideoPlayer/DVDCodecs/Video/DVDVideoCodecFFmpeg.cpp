@@ -37,6 +37,7 @@ extern "C" {
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
+#include <libavutil/hdr_dynamic_metadata.h>
 #include <libavutil/mastering_display_metadata.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
@@ -1258,6 +1259,38 @@ bool CDVDVideoCodecFFmpeg::GetPictureCommon(VideoPicture* pVideoPicture)
         pVideoPicture->hdrTypeAlt = StreamHdrType::HDR_TYPE_HDR10PLUS;
     }
   }
+
+#if defined(HAS_LIBPLACEBO)
+  // HDR10, HDR10+ and Dolby Vision metadata for the libplacebo renderer
+  memset(&pVideoPicture->plColorSpace, 0, sizeof(pl_color_space));
+  memset(&pVideoPicture->plColorRepr, 0, sizeof(pl_color_repr));
+  memset(&pVideoPicture->plDoviMetadata, 0, sizeof(pl_dovi_metadata));
+  {
+    AVFrameSideData* mdm =
+        av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
+    AVFrameSideData* clm = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
+    AVFrameSideData* dhp = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
+    pl_av_hdr_metadata plHdr{};
+    plHdr.mdm = mdm ? reinterpret_cast<const AVMasteringDisplayMetadata*>(mdm->data) : nullptr;
+    plHdr.clm = clm ? reinterpret_cast<const AVContentLightMetadata*>(clm->data) : nullptr;
+    plHdr.dhp = dhp ? reinterpret_cast<const AVDynamicHDRPlus*>(dhp->data) : nullptr;
+    pl_map_hdr_metadata(&pVideoPicture->plColorSpace.hdr, &plHdr);
+
+    AVFrameSideData* dovi = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_DOVI_METADATA);
+    if (dovi)
+    {
+      const auto* metadata = reinterpret_cast<const AVDOVIMetadata*>(dovi->data);
+      const AVDOVIRpuDataHeader* header = av_dovi_get_header(metadata);
+      if (header && header->disable_residual_flag)
+        pl_map_avdovi_metadata(&pVideoPicture->plColorSpace, &pVideoPicture->plColorRepr,
+                               &pVideoPicture->plDoviMetadata, metadata);
+    }
+
+    AVFrameSideData* rpu = av_frame_get_side_data(m_pFrame, AV_FRAME_DATA_DOVI_RPU_BUFFER);
+    if (rpu)
+      pl_hdr_metadata_from_dovi_rpu(&pVideoPicture->plColorSpace.hdr, rpu->data, rpu->size);
+  }
+#endif
 
   if (pVideoPicture->iRepeatPicture)
     pVideoPicture->dts = DVD_NOPTS_VALUE;
