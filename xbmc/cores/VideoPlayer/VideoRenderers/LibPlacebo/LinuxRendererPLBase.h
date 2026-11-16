@@ -16,6 +16,7 @@
 #include "ServiceBroker.h"
 #include "cores/VideoPlayer/Buffers/VideoBufferDRMPRIME.h"
 #include "cores/VideoPlayer/DVDCodecs/Video/DVDVideoCodec.h"
+#include "cores/VideoPlayer/Interface/TimingConstants.h"
 #include "cores/VideoPlayer/VideoRenderers/BaseRenderer.h"
 #include "cores/VideoPlayer/VideoRenderers/HwDecRender/DRMPRIMEEGL.h"
 #include "cores/VideoPlayer/VideoRenderers/VideoShaders/ShaderFormats.h"
@@ -47,7 +48,9 @@ extern "C"
 #include <libavutil/pixfmt.h>
 }
 
+#include <algorithm>
 #include <array>
+#include <vector>
 #include <bit>
 #include <cstring>
 
@@ -256,6 +259,11 @@ private:
   pl_color_space m_colorSpace{};
   pl_chroma_location m_chromaLocation{PL_CHROMA_UNKNOWN};
   std::unique_ptr<PL::RenderConfig> m_plConfig;
+  // Video settings the libplacebo options were last built from. The player applies
+  // them after the renderer is configured, so changes are picked up when rendering.
+  CVideoSettings m_appliedSettings;
+  bool m_appliedSettingsValid{false};
+  void SyncOptions();
   CHDRCapabilities m_displayHDRCaps;
 
   struct QueuedFrameState
@@ -270,6 +278,17 @@ private:
   pl_queue m_plQueue{nullptr};
   double m_queuePtsOffset{0.0};
   bool m_queuePtsOffsetSet{false};
+  // Last pl_queue request, to keep requests monotonic and to step through the
+  // fields of a frame that Kodi renders on several vsyncs.
+  double m_queueLastRequest{-1.0};
+  int m_queueLastIdx{-1};
+  double m_queueLastPts{0.0};
+  int m_queueRepeat{0};
+
+  //! Kodi timestamps (DVD_TIME_BASE) to pl_queue seconds
+  double QueueTime(double pts) const { return (pts - m_queuePtsOffset) / DVD_TIME_BASE; }
+  void PushToQueue(int index, double pts, unsigned int flags);
+  void RequeueHeldFrames();
 
   // Cached GL framebuffer → pl_tex wrapper.
   // pl_opengl_wrap/pl_tex_destroy for a framebuffer flushes GPU command queues on
@@ -609,6 +628,8 @@ bool CLinuxRendererPLBase<TBase>::Configure(const VideoPicture& picture,
       CLog::Log(LOGERROR, "CLinuxRendererPLBase::Configure - pl_queue_create failed");
   }
   m_queuePtsOffsetSet = false;
+  m_queueLastRequest = -1.0;
+  m_queueLastIdx = -1;
 
   // Cache display HDR capabilities for use in RenderHook (avoids per-frame allocation).
   if (this->m_passthroughHDR)
@@ -732,6 +753,8 @@ bool CLinuxRendererPLBase<TBase>::Flush(bool saveBuffers)
   {
     pl_queue_reset(m_plQueue);
     m_queuePtsOffsetSet = false;
+    m_queueLastRequest = -1.0;
+    m_queueLastIdx = -1;
   }
   // The FBO may be recreated after a seek/stop; drop the cached wrapper so
   // RenderHook re-wraps with the current FBO on the next frame.
@@ -766,21 +789,46 @@ void CLinuxRendererPLBase<TBase>::AddVideoPicture(const VideoPicture& picture, i
     m_queuePtsOffsetSet = true;
   }
 
+  PushToQueue(index, picture.pts, picture.iFlags);
+}
+
+template<typename TBase>
+void CLinuxRendererPLBase<TBase>::PushToQueue(int index, double pts, unsigned int flags)
+{
   auto* qf = &m_queueFramePool[index];
   qf->bufferIndex = index;
   qf->renderer = this;
 
+  // pl_queue works in seconds, like the frame and vsync durations.
   pl_source_frame src{};
-  src.pts = picture.pts - m_queuePtsOffset;
+  src.pts = QueueTime(pts);
   src.duration = m_cachedFrameDuration;
-  if (picture.iFlags & DVP_FLAG_INTERLACED)
-    src.first_field = (picture.iFlags & DVP_FLAG_TOP_FIELD_FIRST) ? PL_FIELD_TOP : PL_FIELD_BOTTOM;
+  if (flags & DVP_FLAG_INTERLACED)
+    src.first_field = (flags & DVP_FLAG_TOP_FIELD_FIRST) ? PL_FIELD_TOP : PL_FIELD_BOTTOM;
   src.frame_data = qf;
   src.map = &CLinuxRendererPLBase<TBase>::MapCallback;
   src.unmap = &CLinuxRendererPLBase<TBase>::UnmapCallback;
   src.discard = &CLinuxRendererPLBase<TBase>::DiscardCallback;
 
   pl_queue_push(m_plQueue, &src);
+}
+
+template<typename TBase>
+void CLinuxRendererPLBase<TBase>::RequeueHeldFrames()
+{
+  // pl_queue only moves forward. After a seek or in pause Kodi can render an older
+  // frame, so start over with the frames the renderer still holds, oldest first.
+  pl_queue_reset(m_plQueue);
+  std::vector<int> held;
+  for (int i = 0; i < NUM_BUFFERS; ++i)
+  {
+    if (this->m_buffers[i].videoBuffer)
+      held.push_back(i);
+  }
+  std::sort(held.begin(), held.end(),
+            [this](int a, int b) { return this->m_buffers[a].pts < this->m_buffers[b].pts; });
+  for (int i : held)
+    PushToQueue(i, this->m_buffers[i].pts, this->m_buffers[i].iFlags);
 }
 
 // ---------------------------------------------------------------------------
@@ -908,6 +956,24 @@ void CLinuxRendererPLBase<TBase>::UpdateVideoFilter()
 {
   TBase::UpdateVideoFilter();
   m_plConfig->UpdateVideoFilter(this->m_scalingMethod, this->m_videoSettings);
+  m_appliedSettings = this->m_videoSettings;
+  m_appliedSettingsValid = true;
+}
+
+template<typename TBase>
+void CLinuxRendererPLBase<TBase>::SyncOptions()
+{
+  const CVideoSettings& vs = this->m_videoSettings;
+  if (m_appliedSettingsValid && vs.m_InterlaceMethod == m_appliedSettings.m_InterlaceMethod &&
+      vs.m_ToneMapMethod == m_appliedSettings.m_ToneMapMethod &&
+      vs.m_ToneMapParam == m_appliedSettings.m_ToneMapParam &&
+      vs.m_Brightness == m_appliedSettings.m_Brightness &&
+      vs.m_Contrast == m_appliedSettings.m_Contrast)
+    return;
+
+  m_plConfig->UpdateVideoFilter(this->m_scalingMethod, vs);
+  m_appliedSettings = vs;
+  m_appliedSettingsValid = true;
 
 }
 
@@ -2265,6 +2331,8 @@ bool CLinuxRendererPLBase<TBase>::RenderHook(int idx)
   if (!plbuf.loaded) [[unlikely]]
     return false;
 
+  SyncOptions();
+
   const auto plInst = PL::PLInstance::Get();
   const pl_gpu gpu = plInst->GetGpu();
   const pl_renderer renderer = plInst->GetRenderer();
@@ -2500,8 +2568,31 @@ bool CLinuxRendererPLBase<TBase>::RenderHook(int idx)
     const auto& buf = this->m_buffers[idx];
     const float vsyncDuration = m_cachedVsyncDuration;
 
+    // Kodi renders the current frame on every vsync until the next one is due.
+    // For interlaced frames the repeats show the second field.
+    if (idx != m_queueLastIdx || buf.pts != m_queueLastPts)
+    {
+      m_queueLastIdx = idx;
+      m_queueLastPts = buf.pts;
+      m_queueRepeat = 0;
+    }
+    else
+      ++m_queueRepeat;
+
+    double requestPts = QueueTime(buf.pts);
+    if (m_queueRepeat > 0 && (buf.iFlags & DVP_FLAG_INTERLACED))
+      requestPts += m_cachedFrameDuration / 2;
+
+    if (requestPts < m_queueLastRequest)
+    {
+      CLog::Log(LOGDEBUG, "CLinuxRendererPLBase::RenderHook - requeue, {:.3f} < {:.3f}", requestPts,
+                m_queueLastRequest);
+      RequeueHeldFrames();
+    }
+    m_queueLastRequest = requestPts;
+
     pl_queue_params qparams{};
-    qparams.pts = buf.pts - m_queuePtsOffset;
+    qparams.pts = requestPts;
     qparams.radius = pl_frame_mix_radius(&params);
     qparams.vsync_duration = vsyncDuration;
     // Allow up to 40% of a vsync period for the decoder to deliver the frame.
