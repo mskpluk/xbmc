@@ -1096,7 +1096,7 @@ bool CApplication::OnAction(const CAction &action)
     {
       CVideoSettings vs = appPlayer->GetVideoSettings();
       vs.m_ToneMapMethod = static_cast<ETONEMAPMETHOD>(static_cast<int>(vs.m_ToneMapMethod) + 1);
-      if (vs.m_ToneMapMethod >= VS_TONEMAPMETHOD_MAX)
+      if (vs.m_ToneMapMethod > VS_TONEMAPMETHOD_HABLE)
         vs.m_ToneMapMethod =
             static_cast<ETONEMAPMETHOD>(static_cast<int>(VS_TONEMAPMETHOD_OFF) + 1);
 

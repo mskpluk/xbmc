@@ -262,6 +262,7 @@ private:
   // Video settings the libplacebo options were last built from. The player applies
   // them after the renderer is configured, so changes are picked up when rendering.
   CVideoSettings m_appliedSettings;
+  pl_color_map_params m_autoColorMap{};
   bool m_appliedSettingsValid{false};
   void SyncOptions();
   CHDRCapabilities m_displayHDRCaps;
@@ -917,6 +918,7 @@ bool CLinuxRendererPLBase<TBase>::Supports(ERENDERFEATURE feature) const
     case RENDERFEATURE_STRETCH:
     case RENDERFEATURE_ROTATION:
     case RENDERFEATURE_TONEMAP:
+    case RENDERFEATURE_TONEMAP_LIBPLACEBO:
     case RENDERFEATURE_BRIGHTNESS:
     case RENDERFEATURE_CONTRAST:
       return true;
@@ -2457,6 +2459,17 @@ bool CLinuxRendererPLBase<TBase>::RenderHook(int idx)
     m_plConfig->ApplyCMS(frameOut, this->m_srcPrimaries);
 
   pl_render_params params = m_plConfig->GetOptions()->params;
+
+  // Automatic curve, as an HDR10+ display does: the curve the frame carries, spline otherwise.
+  if (this->m_videoSettings.m_ToneMapMethod == VS_TONEMAPMETHOD_PL_AUTO)
+  {
+    m_autoColorMap =
+        params.color_map_params ? *params.color_map_params : pl_color_map_default_params;
+    m_autoColorMap.tone_mapping_function = plbuf.colorSpace.hdr.ootf.num_anchors > 0
+                                               ? &pl_tone_map_st2094_40
+                                               : &pl_tone_map_spline;
+    params.color_map_params = &m_autoColorMap;
+  }
   params.border = PL_CLEAR_SKIP;
 
   // When frame mixing is active, each source frame is typically shown once

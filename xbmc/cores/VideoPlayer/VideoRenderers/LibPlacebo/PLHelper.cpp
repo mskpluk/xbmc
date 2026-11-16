@@ -225,7 +225,11 @@ void PL::RenderConfig::UpdateVideoFilter(ESCALINGMETHOD scalingMethod,
     pl_options_set_str(m_plOpts, "downscaler", filter);
   }
 
-  static constexpr const char* kToneMaps[] = {nullptr, "reinhard", "spline", "hable"};
+  // Kodi's ACES has no libplacebo counterpart, spline is the closest. The automatic
+  // curve is chosen per frame in the renderer.
+  static constexpr const char* kToneMaps[] = {nullptr,  "reinhard", "spline",   "hable",
+                                              "spline", "spline",   "st2094-40"};
+  static_assert(std::size(kToneMaps) == VS_TONEMAPMETHOD_MAX);
   if (videoSettings.m_ToneMapMethod > 0 && videoSettings.m_ToneMapMethod < VS_TONEMAPMETHOD_MAX)
     pl_options_set_str(m_plOpts, "tone_mapping", kToneMaps[videoSettings.m_ToneMapMethod]);
 
