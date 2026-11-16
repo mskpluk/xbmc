@@ -195,6 +195,27 @@ bool CDisplayInfo::SupportsEOTF(Eotf eotf) const
   }
 }
 
+float CDisplayInfo::GetDesiredContentMaxLuminance() const
+{
+  if (!m_hdr_static_metadata)
+    return 0.0f;
+  return m_hdr_static_metadata->desired_content_max_luminance;
+}
+
+float CDisplayInfo::GetDesiredContentMinLuminance() const
+{
+  if (!m_hdr_static_metadata)
+    return 0.0f;
+  return m_hdr_static_metadata->desired_content_min_luminance;
+}
+
+float CDisplayInfo::GetDesiredContentMaxFrameAvgLuminance() const
+{
+  if (!m_hdr_static_metadata)
+    return 0.0f;
+  return m_hdr_static_metadata->desired_content_max_frame_avg_luminance;
+}
+
 bool CDisplayInfo::SupportsColorimetry(Colorimetry colorimetry) const
 {
   if (!m_colorimetry)

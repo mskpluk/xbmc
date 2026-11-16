@@ -1,0 +1,4 @@
+LIBNAME=libplacebo
+VERSION=7.349.0
+ARCHIVE=$(LIBNAME)-$(VERSION).tar.bz2
+BYPRODUCT=libplacebo.a

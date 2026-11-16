@@ -7866,6 +7866,61 @@ msgctxt "#13486"
 msgid "and Play"
 msgstr ""
 
+#: system/settings/linux.xml
+msgctxt "#13488"
+msgid "Debanding"
+msgstr ""
+
+#: system/settings/linux.xml
+msgctxt "#13489"
+msgid "Remove colour banding artifacts from smooth gradients. Recommended for most content."
+msgstr ""
+
+#: system/settings/linux.xml
+msgctxt "#13490"
+msgid "HDR Peak Detection"
+msgstr ""
+
+#: system/settings/linux.xml
+msgctxt "#13491"
+msgid "Dynamically measure peak brightness from HDR content for more accurate tone mapping."
+msgstr ""
+
+#: system/settings/linux.xml
+msgctxt "#13492"
+msgid "Frame Interpolation"
+msgstr ""
+
+#: system/settings/linux.xml
+msgctxt "#13493"
+msgid "Interpolate frames to smooth motion at the display refresh rate. May increase latency."
+msgstr ""
+
+#: system/settings/linux.xml
+msgctxt "#13494"
+msgid "Render Quality Preset"
+msgstr ""
+
+#: system/settings/linux.xml
+msgctxt "#13495"
+msgid "Sets the overall libplacebo render quality. Fast uses minimal processing; Default balances quality and performance; High Quality enables the best upscaling and tone mapping at higher GPU cost."
+msgstr ""
+
+#: system/settings/linux.xml
+msgctxt "#13496"
+msgid "Fast"
+msgstr ""
+
+#: system/settings/linux.xml
+msgctxt "#13497"
+msgid "Default"
+msgstr ""
+
+#: system/settings/linux.xml
+msgctxt "#13498"
+msgid "High Quality"
+msgstr ""
+
 #empty strings from id 13487 to 13504
 
 #: system/settings/settings.xml
@@ -9744,6 +9799,22 @@ msgstr ""
 #: xbmc/video/dialogs/GUIDialogVideoSettings.cpp
 msgctxt "#16330"
 msgid "Bicubic (0,1.)"
+msgstr ""
+
+msgctxt "#16331"
+msgid "LibPlacebo"
+msgstr ""
+
+msgctxt "#16337"
+msgid "libplacebo - Bob"
+msgstr ""
+
+msgctxt "#16338"
+msgid "libplacebo - YADIF"
+msgstr ""
+
+msgctxt "#16339"
+msgid "libplacebo - BWDIF"
 msgstr ""
 
 #empty strings from id 16331 to 16333

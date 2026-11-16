@@ -54,6 +54,10 @@
 #define SETTING_VIDEO_VDPAU_NOISE         "vdpau.noise"
 #define SETTING_VIDEO_VDPAU_SHARPNESS     "vdpau.sharpness"
 
+#define SETTING_VIDEO_LIBPLACEBO_DEBAND "video.libplacebo.deband"
+#define SETTING_VIDEO_LIBPLACEBO_PEAKDETECT "video.libplacebo.peakdetect"
+#define SETTING_VIDEO_LIBPLACEBO_FRAMEMIX "video.libplacebo.framemix"
+
 #define SETTING_VIDEO_INTERLACEMETHOD     "video.interlacemethod"
 #define SETTING_VIDEO_SCALINGMETHOD       "video.scalingmethod"
 
@@ -236,6 +240,22 @@ void CGUIDialogVideoSettings::OnSettingChanged(const std::shared_ptr<const CSett
     vs.m_StereoInvert = std::static_pointer_cast<const CSettingBool>(setting)->GetValue();
     appPlayer->SetVideoSettings(vs);
   }
+  else if (settingId == SETTING_VIDEO_LIBPLACEBO_DEBAND ||
+           settingId == SETTING_VIDEO_LIBPLACEBO_PEAKDETECT ||
+           settingId == SETTING_VIDEO_LIBPLACEBO_FRAMEMIX)
+  {
+    const auto globalSettings = CServiceBroker::GetSettingsComponent()->GetSettings();
+    const bool value = std::static_pointer_cast<const CSettingBool>(setting)->GetValue();
+    if (settingId == SETTING_VIDEO_LIBPLACEBO_DEBAND)
+      globalSettings->SetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_DEBAND, value);
+    else if (settingId == SETTING_VIDEO_LIBPLACEBO_PEAKDETECT)
+      globalSettings->SetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_PEAKDETECT, value);
+    else
+      globalSettings->SetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_FRAMEMIX, value);
+    // Trigger renderer to re-apply the updated global settings immediately.
+    CVideoSettings vs = appPlayer->GetVideoSettings();
+    appPlayer->SetVideoSettings(vs);
+  }
 }
 
 void CGUIDialogVideoSettings::OnSettingAction(const std::shared_ptr<const CSetting>& setting)
@@ -381,6 +401,9 @@ void CGUIDialogVideoSettings::InitializeSettings()
   entries.emplace_back(16328, VS_INTERLACEMETHOD_VAAPI_MADI);
   entries.emplace_back(16329, VS_INTERLACEMETHOD_VAAPI_MACI);
   entries.emplace_back(16320, VS_INTERLACEMETHOD_DXVA_AUTO);
+  entries.emplace_back(16337, VS_INTERLACEMETHOD_LIBPLACEBO_BOB);
+  entries.emplace_back(16338, VS_INTERLACEMETHOD_LIBPLACEBO_YADIF);
+  entries.emplace_back(16339, VS_INTERLACEMETHOD_LIBPLACEBO_BWDIF);
 
   /* remove unsupported methods */
   for (TranslatableIntegerSettingOptions::iterator it = entries.begin(); it != entries.end(); )
@@ -505,6 +528,24 @@ void CGUIDialogVideoSettings::InitializeSettings()
     AddSlider(groupVideo, SETTING_VIDEO_TONEMAP_PARAM, 36556, SettingLevel::Basic,
               videoSettings.m_ToneMapParam, "{:2.2f}", 0.1f, 0.1f, 5.0f, 36556, usePopup, false,
               visible);
+  }
+
+  // libplacebo render quality — only present in HAS_LIBPLACEBO builds; existence of the
+  // deband setting is the runtime gate (returns nullptr when the setting wasn't registered).
+  {
+    const auto globalSettings = CServiceBroker::GetSettingsComponent()->GetSettings();
+    if (globalSettings->GetSetting(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_DEBAND))
+    {
+      AddToggle(groupVideo, SETTING_VIDEO_LIBPLACEBO_DEBAND, 13488, SettingLevel::Basic,
+                globalSettings->GetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_DEBAND), false,
+                true, 13489);
+      AddToggle(groupVideo, SETTING_VIDEO_LIBPLACEBO_PEAKDETECT, 13490, SettingLevel::Basic,
+                globalSettings->GetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_PEAKDETECT),
+                false, true, 13491);
+      AddToggle(groupVideo, SETTING_VIDEO_LIBPLACEBO_FRAMEMIX, 13492, SettingLevel::Basic,
+                globalSettings->GetBool(CSettings::SETTING_VIDEOPLAYER_LIBPLACEBO_FRAMEMIX), false,
+                true, 13493);
+    }
   }
 
   // stereoscopic settings
