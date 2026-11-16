@@ -45,6 +45,14 @@ using namespace NVDEC;
 
 namespace
 {
+//! libplacebo deinterlaces in the renderer, the decoder passes the fields through.
+bool RendererDeinterlaces(EINTERLACEMETHOD method)
+{
+  return method == EINTERLACEMETHOD::VS_INTERLACEMETHOD_LIBPLACEBO_BOB ||
+         method == EINTERLACEMETHOD::VS_INTERLACEMETHOD_LIBPLACEBO_YADIF ||
+         method == EINTERLACEMETHOD::VS_INTERLACEMETHOD_LIBPLACEBO_BWDIF;
+}
+
 std::atomic<bool> interopFailed{false};
 //! CUDA device that renders the display, -1 for the CUDA default device
 std::atomic<int> cudaDeviceIndex{-1};
@@ -506,8 +514,9 @@ CDVDVideoCodec::VCReturn CDecoder::Decode(AVCodecContext* avctx, AVFrame* frame)
   if (frame->format != AV_PIX_FMT_CUDA || !frame->hw_frames_ctx)
     return CDVDVideoCodec::VC_FATAL;
 
-  if (m_deintFailed || m_processInfo.GetVideoSettings().m_InterlaceMethod ==
-                           EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE)
+  const EINTERLACEMETHOD method = m_processInfo.GetVideoSettings().m_InterlaceMethod;
+  if (m_deintFailed || method == EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE ||
+      RendererDeinterlaces(method))
     CloseDeinterlacer();
   else if (!m_filterGraph && (frame->flags & AV_FRAME_FLAG_INTERLACED))
     InitDeinterlacer(frame);
@@ -547,9 +556,12 @@ bool CDecoder::GetPicture(AVCodecContext* avctx, VideoPicture* picture)
     picture->iRepeatPicture = 0.0;
   }
 
-  // The renderer draws whole frames only. Without the deinterlacer it would
-  // otherwise be asked for single fields.
-  picture->iFlags &= ~DVP_FLAG_INTERLACED;
+  // The GL renderer draws whole frames only, without the deinterlacer it would
+  // otherwise be asked for single fields. libplacebo deinterlaces the fields itself.
+  if (m_filtered || !RendererDeinterlaces(m_processInfo.GetVideoSettings().m_InterlaceMethod))
+    picture->iFlags &= ~DVP_FLAG_INTERLACED;
+  else if (picture->iFlags & DVP_FLAG_INTERLACED)
+    m_processInfo.SetVideoDeintMethod("libplacebo");
 
   if (picture->videoBuffer)
     picture->videoBuffer->Release();
