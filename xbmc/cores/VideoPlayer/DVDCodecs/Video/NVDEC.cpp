@@ -39,6 +39,14 @@ namespace
 // Frames the renderer may hold in addition to what the decoder keeps for reference.
 constexpr int RENDER_EXTRA_FRAMES = 8;
 
+//! libplacebo deinterlaces in the renderer, the decoder passes the fields through.
+bool RendererDeinterlaces(EINTERLACEMETHOD method)
+{
+  return method == EINTERLACEMETHOD::VS_INTERLACEMETHOD_LIBPLACEBO_BOB ||
+         method == EINTERLACEMETHOD::VS_INTERLACEMETHOD_LIBPLACEBO_YADIF ||
+         method == EINTERLACEMETHOD::VS_INTERLACEMETHOD_LIBPLACEBO_BWDIF;
+}
+
 bool IsSupportedSwFormat(AVPixelFormat fmt)
 {
   // Two-plane layouts the GL renderer handles with its NV12 shader.
@@ -372,9 +380,12 @@ CDVDVideoCodec::VCReturn CDecoder::Decode(AVCodecContext* avctx, AVFrame* frame)
   if (frame->format != AV_PIX_FMT_CUDA || !frame->hw_frames_ctx)
     return CDVDVideoCodec::VC_FATAL;
 
+  const EINTERLACEMETHOD method = m_processInfo.GetVideoSettings().m_InterlaceMethod;
+  if (RendererDeinterlaces(method))
+    CloseDeinterlacer();
   const bool deint = (frame->flags & AV_FRAME_FLAG_INTERLACED) && !m_deintFailed &&
-                     m_processInfo.GetVideoSettings().m_InterlaceMethod !=
-                         EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE;
+                     method != EINTERLACEMETHOD::VS_INTERLACEMETHOD_NONE &&
+                     !RendererDeinterlaces(method);
   if (deint && (m_filterGraph || InitDeinterlacer(frame)))
   {
     AVFrame* input = av_frame_clone(frame);
@@ -408,6 +419,10 @@ bool CDecoder::GetPicture(AVCodecContext* avctx, VideoPicture* picture)
     picture->iRepeatPicture = -0.5;
     picture->iFlags &= ~DVP_FLAG_INTERLACED;
   }
+  // libplacebo deinterlaces the fields itself.
+  else if ((picture->iFlags & DVP_FLAG_INTERLACED) &&
+           RendererDeinterlaces(m_processInfo.GetVideoSettings().m_InterlaceMethod))
+    m_processInfo.SetVideoDeintMethod("libplacebo");
 
   if (picture->videoBuffer)
     picture->videoBuffer->Release();
